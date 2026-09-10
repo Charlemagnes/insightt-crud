@@ -1,0 +1,12 @@
+/*
+ * Ant Design is the only styling system here (CLAUDE.md), and its theme tokens
+ * own typography — see `src/providers/Antd.tsx`. What is left in this file is
+ * the page-box reset antd does not reach: antd styles components, not the
+ * document.
+ */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}

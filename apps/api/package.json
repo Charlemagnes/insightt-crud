@@ -1,0 +1,21 @@
+{
+  "name": "@insightt/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@insightt/shared": "*"
+  },
+  "devDependencies": {
+    "@types/jest": "^30",
+    "@types/node": "^20",
+    "jest": "^30",
+    "ts-jest": "^29",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

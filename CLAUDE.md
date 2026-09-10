@@ -26,7 +26,7 @@ npm install                    # workspace install, from the root
 bash scripts/setup-auth0.sh    # one-time Auth0 tenant + env setup
 npm run dev                    # Express on :4000, Next on :3000, concurrently
 npm run build                  # production build (also the only full type-check)
-npm run lint                   # eslint (flat config, no args needed)
+npm run lint                   # fans out to each workspace; eslint flat config in apps/web
 npm run db:generate            # drizzle-kit — generate a migration from schema.ts
 npm run db:migrate             # apply migrations
 npm run test                   # Jest: unit (apps/api, packages/shared) + integration (apps/web)
@@ -49,9 +49,6 @@ Both apps depend on `@insightt/shared`; neither depends on the other. The root
 the file-level structure inside each workspace — follow it rather than inventing
 folders.
 
-> Until step 1 of `PLAN.md` §18 is done, the Next scaffold is still at the repo
-> root (`app/`, `next.config.ts`). Moving it into `apps/web/` is the first task.
-
 ## Conventions
 
 **Stack versions matter here.** Next 16, React 19.2, Ant Design **v6**, Zod **v4**.
@@ -73,9 +70,12 @@ v16 APIs differ from older releases.
   is a config tarpit. Do not "modernise" it to ESM.
 - `packages/shared` exports raw TypeScript — no build step. `apps/web` consumes it
   via `transpilePackages`, `apps/api` via `tsx` in dev and `moduleNameMapper` in Jest.
-- `@/*` resolves to each app's own root.
-- Fonts come from `next/font/google` in `apps/web/app/layout.tsx`, exposed as CSS
-  variables on `<html>`.
+- `@/*` resolves to each app's own `src/`.
+- Fonts come from `next/font/google` in `apps/web/src/app/layout.tsx`, exposed as
+  CSS variables on `<html>`.
+- **Ant Design's CSS-in-JS needs the registry.** `apps/web/src/providers/Antd.tsx`
+  wraps the tree in `@ant-design/nextjs-registry`; without it Next's build-time
+  prerender of client components ships an unstyled first paint.
 
 ## Domain rules that are easy to get wrong
 

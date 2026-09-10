@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    // CommonJS by design — see CLAUDE.md. ts-jest on ESM is a config tarpit.
+    "module": "commonjs",
+    "moduleResolution": "node10",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node", "jest"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      // `@insightt/shared` is raw TypeScript with no build step. node10
+      // resolution does not read the package's `exports` field, so the source
+      // path is spelled out here — the same mapping Jest carries in
+      // `jest.config.js`. Change one and you must change the other.
+      "@insightt/shared": ["../../packages/shared/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "jest.config.js"],
+  "exclude": ["node_modules"]
+}
