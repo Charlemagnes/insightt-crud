@@ -8,12 +8,21 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@insightt/shared": "*"
+    "@insightt/shared": "*",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-oauth2-jwt-bearer": "^1.10.0",
+    "zod": "^4.6.2"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30",
     "@types/node": "^20",
+    "@types/supertest": "^7.2.1",
     "jest": "^30",
+    "supertest": "^7.2.2",
     "ts-jest": "^29",
     "tsx": "^4",
     "typescript": "^5"

@@ -59,12 +59,14 @@ scripts only — it is not itself an app.
 **Internal structure**, fixed now so naming is settled before hour one:
 
 ```
-apps/api/src/     index.ts  env.ts
+apps/api/src/     index.ts  app.ts  env.ts
                   db/{client,schema}.ts
                   middleware/{auth,logging,validate,errors}.ts
                   tasks/{routes,service,repository,mappers}.ts
+                  types/express.d.ts
 
 apps/web/src/     app/{layout,page}.tsx
+                  config.ts
                   providers/{Auth0,Query,Antd}.tsx
                   components/auth/    RequireAuth  LandingPanel
                                       LoginButton  LogoutButton
@@ -88,6 +90,16 @@ are four files between them and nesting would be ceremony.
 `tasks/mappers.ts` is kept even though it looks like ceremony — it is the file
 that makes §11's Drizzle-row-vs-wire-contract separation visible in ten seconds
 rather than taken on faith.
+
+**`app.ts` is separate from `index.ts` on purpose.** `createApp(deps)` takes the
+Task repository and the auth middleware as arguments; `index.ts` is the only
+file that reads the environment, builds the real ones and listens. That split is
+the seam the whole backend test suite hangs off — a test gets the real
+middleware stack with no tenant, no network and no database behind it.
+
+`apps/web/src/config.ts` is the frontend's equivalent boundary: the one place
+`process.env.NEXT_PUBLIC_*` is read, validated loudly so a missing value fails
+the build instead of becoming a redirect to `https://undefined/authorize`.
 
 ---
 
@@ -317,7 +329,10 @@ Structured JSON to the console only (no audit table), in two middlewares:
 
 - **Inbound, mounted *before* auth** — ISO timestamp, request id
   (`crypto.randomUUID()`), `userId: null`, method, path, route params, query
-  params, headers, body (truncated at ~1KB)
+  params, headers, body (truncated at ~1KB). Express fills route params in as it
+  matches a route, which has not happened at this mount point, so on the way in
+  the field is present but empty and the query string is what carries the
+  caller's input. That is the price of the ordering below, and it is worth it.
 - **Actor stamp, mounted *after* auth** — attaches the resolved `userId` to the
   same request id
 - **Outbound**, on the response hook — status code, duration in ms, error class
@@ -531,7 +546,10 @@ automatically. Zustand owns "what the user is looking at"; Query owns the rows.
 ## 13. Frontend structure
 
 One route, `/`. Two screens: a logged-out landing panel and the task list.
-`RequireAuth` fires `loginWithRedirect()` when `!isLoading && !isAuthenticated`.
+`RequireAuth` picks between them — spinner while `isLoading`, then the landing
+panel or the list. It does **not** fire `loginWithRedirect()` on its own: a
+signed-out person who lands on the app should see what the app is and press a
+button, not get bounced to a login screen they did not ask for.
 
 - `Table` for the list, with server-driven pagination wired to `useTaskListStore`
 - `Form` + `Modal` for create and edit

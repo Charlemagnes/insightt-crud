@@ -1,30 +1,44 @@
 "use client";
 
-import { SHARED_PACKAGE_NAME } from "@insightt/shared";
-import { Flex, Typography } from "antd";
+import { Layout } from "antd";
 
-const { Title, Paragraph, Text } = Typography;
+import { RequireAuth } from "@/components/auth/RequireAuth";
+import { AppHeader } from "@/components/shared/AppHeader";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { TaskTable } from "@/components/tasks/TaskTable";
+import { useTasks } from "@/hooks/useTasks";
+
+const { Content } = Layout;
 
 /**
- * Placeholder shell. The landing panel, the auth gate and the task list arrive
- * in the tickets that follow; what this renders today is the prefactor made
- * visible — every pixel comes from Ant Design, and the wire-contract package
- * compiles through `transpilePackages`.
+ * The app's only route. Two screens live behind it — the landing panel and the
+ * task list — and `RequireAuth` decides which one the person is looking at.
  */
 export default function Home() {
   return (
-    <Flex
-      vertical
-      align="center"
-      justify="center"
-      gap="small"
-      style={{ minHeight: "100vh" }}
-    >
-      <Title level={1}>Task List</Title>
-      <Paragraph type="secondary">Sign-in arrives in the next ticket.</Paragraph>
-      <Text type="secondary" code>
-        {SHARED_PACKAGE_NAME}
-      </Text>
-    </Flex>
+    <RequireAuth>
+      <TaskListScreen />
+    </RequireAuth>
+  );
+}
+
+function TaskListScreen() {
+  const { data, isPending, isError, error, refetch } = useTasks();
+
+  return (
+    <Layout style={{ minHeight: "100vh", background: "transparent" }}>
+      <AppHeader />
+      <Content style={{ padding: 24, maxWidth: 960, width: "100%", margin: "0 auto" }}>
+        {isError ? (
+          <ErrorState
+            title="Could not load your tasks"
+            description={error.message}
+            onRetry={() => void refetch()}
+          />
+        ) : (
+          <TaskTable tasks={data?.items ?? []} loading={isPending} />
+        )}
+      </Content>
+    </Layout>
   );
 }

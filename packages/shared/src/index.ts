@@ -6,11 +6,9 @@
  * `apps/web` transpiles it through `transpilePackages`, `apps/api` resolves it
  * through `tsx` in development and a Jest `moduleNameMapper` under test.
  *
- * The Zod schemas and the Status transition rules land in later tickets. Until
- * then the marker below is the package's only export, and it is what proves
- * both resolution paths: `apps/api/src/shared-resolution.test.ts` asserts on it
- * under Jest, and `apps/web` importing it is what makes `next build` fail if
- * `transpilePackages` is ever dropped. It goes away once `schemas/task.ts`
- * gives both apps something real to import.
+ * Nothing that does not cross the wire belongs here. The signed-in person, in
+ * particular, does not: `AuthUser` lives in `apps/web` and `Actor` in
+ * `apps/api`, because the API never returns a user — it only reads the token.
  */
-export const SHARED_PACKAGE_NAME = "@insightt/shared";
+export * from "./schemas/errors";
+export * from "./schemas/task";
