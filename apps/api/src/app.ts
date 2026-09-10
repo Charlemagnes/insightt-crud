@@ -5,7 +5,6 @@ import { attachActor } from "@/middleware/auth";
 import { createErrorHandler, notFoundHandler } from "@/middleware/errors";
 import {
   consoleLogSink,
-  createActorLogging,
   createRequestLogging,
   type LogSink,
 } from "@/middleware/logging";
@@ -39,6 +38,13 @@ export function createApp({
   const app = express();
   app.disable("x-powered-by");
 
+  // Logging goes first, ahead of everything that can end a request on its own:
+  // `cors` answers a preflight itself, `express.json` throws on a body it
+  // cannot read, and auth rejects a bad token. Mounted any lower, each of those
+  // would escape the log entirely. It writes its lines when the response
+  // closes — see `createRequestLogging`.
+  app.use(createRequestLogging(log));
+
   app.use(
     cors({
       origin: webOrigin,
@@ -51,13 +57,8 @@ export function createApp({
   );
   app.use(express.json({ limit: MAX_BODY_SIZE }));
 
-  // Order below this line is the design, not an accident. Logging sits after
-  // the body parser so it can truncate a parsed body, and before auth so a
-  // rejected request still produces a pair of log lines.
-  app.use(createRequestLogging(log));
-
   const api = Router();
-  api.use(requireAuth, attachActor, createActorLogging(log));
+  api.use(requireAuth, attachActor);
   api.use("/tasks", createTaskRoutes(taskRepository));
   app.use("/api", api);
 

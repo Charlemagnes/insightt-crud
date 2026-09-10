@@ -239,7 +239,7 @@ Errors return `{ error: { code, message, details? } }`.
 |---|---|---|
 | `UNAUTHENTICATED` | 401 | missing, invalid or expired token |
 | `NOT_FOUND` | 404 | no such task, or not owned by the Actor |
-| `VALIDATION_FAILED` | 422 | payload fails Zod; `details` carries `error.issues` |
+| `VALIDATION_FAILED` | 422 | payload fails Zod; `details` carries `error.issues`. Also covers a body `express.json` could not read at all — unparseable or over the size limit — reported as `422` rather than the parser's own `400`/`413` so this table stays the whole vocabulary, with the parser's reason in `details` |
 | `FIELD_NOT_EDITABLE` | 422 | field not mutable in the task's current status |
 | `INVALID_TRANSITION` | 409 | transition not permitted from the current status |
 | `VERSION_CONFLICT` | 412 | `If-Match` present but stale |
@@ -325,27 +325,41 @@ one that must distinguish a replay from a rejection.
 
 ## 9. Logging
 
-Structured JSON to the console only (no audit table), in two middlewares:
+Structured JSON to the console only (no audit table). One middleware, mounted
+first, writing three lines per request:
 
-- **Inbound, mounted *before* auth** — ISO timestamp, request id
-  (`crypto.randomUUID()`), `userId: null`, method, path, route params, query
-  params, headers, body (truncated at ~1KB). Express fills route params in as it
-  matches a route, which has not happened at this mount point, so on the way in
-  the field is present but empty and the query string is what carries the
-  caller's input. That is the price of the ordering below, and it is worth it.
-- **Actor stamp, mounted *after* auth** — attaches the resolved `userId` to the
-  same request id
-- **Outbound**, on the response hook — status code, duration in ms, error class
-  on failure
+- **Inbound** — the ISO timestamp the request was *received*, a request id
+  (`crypto.randomUUID()`), `userId: null`, method, path, matched route, route
+  params, query params, headers, body (truncated at ~1KB)
+- **Actor** — the resolved `userId`, on the same request id, and only for a
+  request that got past auth
+- **Outbound** — status code, duration in ms, error class on failure
 - **Redacted** — `authorization`, `cookie`, `set-cookie` → `[REDACTED]`
 
-Mounting inbound before auth is deliberate. The brief asks to log *all* api
-activities, with headers as input and status code as output; a rejected request
-is an api activity, it has headers, and `401` is a status code. Mounted only
-after `express-oauth2-jwt-bearer`, none of those requests would produce a log
-line at all — and "send a bad token, check the log" is the first thing a
-reviewer tries. An unauthenticated request logs `userId: null`, which is
-information, not a gap.
+**Mounted first — above CORS, the body parser and auth.** The brief asks to log
+*all* api activities, with headers as input and status code as output. Every
+middleware below can end a request on its own: `cors` answers a preflight
+itself, `express.json` throws on a body it cannot read, and
+`express-oauth2-jwt-bearer` rejects a bad token. Each of those is an api
+activity, each has headers, and `401` is a status code — mounted any lower,
+whole classes of request produce no line at all, and "send a bad token, check
+the log" is the first thing a reviewer tries. An unauthenticated request logs
+`userId: null`, which is information, not a gap.
+
+**Written when the response closes**, the way `morgan` does it, rather than as
+the request arrives. The fields that matter do not exist yet at arrival:
+`req.body` is parsed by a later middleware, and Express fills `req.params` in
+only once it has matched a route — a logger that writes on the way in can only
+ever report an empty `params` and no body. The inbound line therefore carries
+the time the request was *received*, not the time it was written, so the record
+says when things happened even though the console does not. The hook is `close`
+rather than `finish`, so a response the client abandoned is logged too, marked
+`aborted`.
+
+Emitting all three lines from one place is also what keeps them in order and on
+one request id: the Actor is read off the request that `attachActor` stamped,
+rather than logged by a second middleware that would otherwise race ahead of the
+inbound line it belongs under.
 
 ---
 

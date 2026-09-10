@@ -5,8 +5,10 @@ import { actorOf } from "@/middleware/auth";
 import type { TaskRepository } from "@/tasks/repository";
 
 /**
- * Pagination defaults. They become the parsed `TaskListQuery` once the query
- * string is validated; until then every page is the first one.
+ * Pagination defaults, standing in until the query string is validated. They
+ * are the same two numbers `TaskListQuery` will carry as Zod `.default()`s in
+ * `@insightt/shared`; when that lands these get deleted, not reconciled —
+ * nothing in this repo is meant to be hand-typed twice (PLAN.md §11).
  */
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 10;

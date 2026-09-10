@@ -9,6 +9,11 @@ import { useSessionStore } from "@/stores/session";
  * `@insightt/shared`, so callers branch on it rather than on a message —
  * `VERSION_CONFLICT` and `INVALID_TRANSITION` are different problems with
  * different recoveries.
+ *
+ * `apps/api/src/middleware/errors.ts` declares a twin of this class. The two
+ * are deliberately not shared: `@insightt/shared` holds wire contracts, and a
+ * runtime class that throws is not one. What crosses the wire is the envelope
+ * they both agree on, `ErrorResponseSchema`.
  */
 export class ApiError extends Error {
   constructor(

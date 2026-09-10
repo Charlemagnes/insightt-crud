@@ -8,6 +8,11 @@ import type { LogSink } from "@/middleware/logging";
  * A failure the API means to report. Anything thrown that is not one of these
  * is a bug, and is reported as `500 INTERNAL` with nothing of its insides in
  * the response body.
+ *
+ * `apps/web/src/api/client.ts` declares a twin of this class. The two are
+ * deliberately not shared: `@insightt/shared` holds wire contracts, and a
+ * runtime class that throws is not one. What crosses the wire is the envelope
+ * they both agree on, `ErrorResponseSchema`.
  */
 export class ApiError extends Error {
   constructor(
@@ -44,7 +49,7 @@ export function createErrorHandler(log: LogSink): ErrorRequestHandler {
 
     res.locals.errorName = error instanceof Error ? error.name : "Unknown";
 
-    const { status, code, message, details } = describe(error);
+    const { status, code, message, details } = classify(error);
 
     // The internals of an unexpected failure are worth keeping, just not worth
     // returning: they go to the log, beside the request id that produced them.
@@ -58,20 +63,21 @@ export function createErrorHandler(log: LogSink): ErrorRequestHandler {
     }
 
     const body: ErrorResponse = {
-      error: details === undefined ? { code, message } : { code, message, details },
+      error:
+        details === undefined ? { code, message } : { code, message, details },
     };
     res.status(status).json(body);
   };
 }
 
-interface DescribedError {
+interface ClassifiedError {
   status: number;
   code: ErrorCode;
   message: string;
   details?: unknown;
 }
 
-function describe(error: unknown): DescribedError {
+function classify(error: unknown): ClassifiedError {
   if (error instanceof ApiError) {
     return {
       status: error.status,
@@ -92,9 +98,47 @@ function describe(error: unknown): DescribedError {
     };
   }
 
+  // Unparseable JSON and an oversized payload are the caller's mistake, and
+  // `express.json` throws them before any route or schema is reached. Without
+  // this they would be reported as `500 INTERNAL`, blaming the server for a
+  // request it was right to refuse.
+  if (isMalformedRequest(error)) {
+    return {
+      status: 422,
+      code: "VALIDATION_FAILED",
+      message: "Request body could not be read",
+      details: { reason: error.type },
+    };
+  }
+
   return {
     status: 500,
     code: "INTERNAL",
     message: "Something went wrong",
   };
+}
+
+/**
+ * `body-parser` tags every error it throws with a `type` and a 4xx `status`
+ * (`entity.parse.failed`, `entity.too.large`, `charset.unsupported`, …).
+ * Matching on the shape rather than on the message keeps this independent of
+ * its wording, and of which of the several failures it happened to be.
+ *
+ * The status is reported as `422 VALIDATION_FAILED` rather than the 400 or 413
+ * the parser chose, so that the frozen error table in PLAN.md §6 stays the
+ * whole vocabulary; the parser's own reason travels in `details`.
+ */
+function isMalformedRequest(
+  error: unknown,
+): error is Error & { type: string; status: number } {
+  if (!(error instanceof Error) || !("type" in error) || !("status" in error)) {
+    return false;
+  }
+  const { type, status } = error as { type: unknown; status: unknown };
+  return (
+    typeof type === "string" &&
+    typeof status === "number" &&
+    status >= 400 &&
+    status < 500
+  );
 }

@@ -3,6 +3,7 @@ import "dotenv/config";
 import { createApp } from "@/app";
 import { loadEnv } from "@/env";
 import { createAuthMiddleware } from "@/middleware/auth";
+import { consoleLogSink } from "@/middleware/logging";
 import { emptyTaskRepository } from "@/tasks/repository";
 
 /**
@@ -19,12 +20,11 @@ const app = createApp({
 });
 
 app.listen(env.port, () => {
-  console.log(
-    JSON.stringify({
-      ts: new Date().toISOString(),
-      direction: "startup",
-      message: `@insightt/api listening on http://localhost:${env.port}`,
-      webOrigin: env.webOrigin,
-    }),
-  );
+  consoleLogSink({
+    ts: new Date().toISOString(),
+    requestId: null,
+    direction: "startup",
+    message: `@insightt/api listening on http://localhost:${env.port}`,
+    webOrigin: env.webOrigin,
+  });
 });

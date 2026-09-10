@@ -10,7 +10,7 @@ import type { RequestHandler } from "express";
 export interface LogRecord {
   ts: string;
   requestId: string | null;
-  direction: "inbound" | "actor" | "outbound" | "error";
+  direction: "startup" | "inbound" | "actor" | "outbound" | "error";
   [field: string]: unknown;
 }
 
@@ -40,70 +40,74 @@ const BODY_LOG_LIMIT = 1024;
 /**
  * Logs every request in and every response out.
  *
- * Mount this **before** the auth middleware. The brief asks for all API
- * activity logged, with headers in and a status code out; a rejected request
- * has both, and mounted after `express-oauth2-jwt-bearer` it would produce no
- * line at all — leaving "send a bad token, read the log" with nothing to read.
- * An unauthenticated request logs `userId: null`, which is information rather
- * than a gap; the Actor's User ID is stamped onto the same request id by
- * `createActorLogging` once auth has resolved.
+ * **Mount it first**, ahead of CORS, the body parser and auth. Everything
+ * downstream can end a request on its own — `cors` answers a preflight itself,
+ * `express.json` throws on a malformed body, `express-oauth2-jwt-bearer`
+ * rejects a bad token — and each of those is API activity with headers and a
+ * status code. Mounted anywhere further down, whole classes of request produce
+ * no line at all, and "send a bad token, read the log" has nothing to read.
  *
- * Mount it **after** the body parser, so the body it truncates is the parsed
- * one.
+ * **Both lines are written when the response closes**, the way `morgan` does
+ * it, because the interesting fields do not exist at the moment a request
+ * arrives: `req.body` is parsed by a later middleware, and Express fills
+ * `req.params` in only once it has matched a route. The inbound line still
+ * carries the time the request was *received*, not the time it was written, so
+ * the record says when things happened even though the console does not.
+ *
+ * Emitting all three lines from one place is also what keeps them in order and
+ * on one request id: the Actor is read off the request that `attachActor`
+ * stamped, rather than logged by a second middleware racing ahead of the first.
  */
 export function createRequestLogging(log: LogSink): RequestHandler {
   return (req, res, next) => {
     const requestId = randomUUID();
-    req.requestId = requestId;
+    const receivedAt = new Date().toISOString();
     const startedAt = process.hrtime.bigint();
+    req.requestId = requestId;
 
-    log({
-      ts: new Date().toISOString(),
-      requestId,
-      direction: "inbound",
-      userId: null,
-      method: req.method,
-      path: req.originalUrl,
-      // Express fills `params` in as it matches a route, which has not happened
-      // yet at this mount point — deliberately, see above. It is the query
-      // string that carries the caller's input on the way in.
-      params: req.params,
-      query: req.query,
-      headers: redactHeaders(req.headers),
-      body: truncateBody(req.body),
-    });
+    // `close` rather than `finish`: it fires for a response the client gave up
+    // on as well as one that completed, so an aborted request is still logged.
+    res.on("close", () => {
+      const completed = res.writableEnded;
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
 
-    res.on("finish", () => {
-      const durationNs = process.hrtime.bigint() - startedAt;
+      log({
+        ts: receivedAt,
+        requestId,
+        direction: "inbound",
+        // Always null. The Actor is a separate line by design: a request that
+        // never got past auth still has to appear here, and it appears with the
+        // User ID recorded as absent rather than not appearing at all.
+        userId: null,
+        method: req.method,
+        path: req.originalUrl,
+        route: req.route?.path ?? null,
+        params: req.params,
+        query: req.query,
+        headers: redactHeaders(req.headers),
+        body: truncateBody(req.body),
+      });
+
+      if (req.actor) {
+        log({
+          ts: new Date().toISOString(),
+          requestId,
+          direction: "actor",
+          userId: req.actor.userId,
+        });
+      }
+
       log({
         ts: new Date().toISOString(),
         requestId,
         direction: "outbound",
-        status: res.statusCode,
-        durationMs: Number(durationNs) / 1e6,
-        ...(typeof res.locals.errorName === "string"
-          ? { error: res.locals.errorName }
-          : {}),
+        status: completed ? res.statusCode : null,
+        durationMs,
+        ...(completed ? {} : { aborted: true }),
+        ...(res.locals.errorName ? { error: res.locals.errorName } : {}),
       });
     });
 
-    next();
-  };
-}
-
-/**
- * Stamps the resolved Actor onto the request id the inbound line already
- * carries. Mount after the auth middleware; without it the log knows a request
- * happened but not who made it.
- */
-export function createActorLogging(log: LogSink): RequestHandler {
-  return (req, _res, next) => {
-    log({
-      ts: new Date().toISOString(),
-      requestId: req.requestId ?? null,
-      direction: "actor",
-      userId: req.actor?.userId ?? null,
-    });
     next();
   };
 }

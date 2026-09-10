@@ -126,14 +126,39 @@ describe("createApp", () => {
       expect(lines(records, "actor")).toHaveLength(0);
     });
 
-    it("carries route and query parameters on the inbound line", async () => {
+    it("carries the query parameters on the inbound line", async () => {
       const { app, records } = harness();
 
       await request(app).get("/api/tasks?page=2&pageSize=5");
 
       const [inbound] = lines(records, "inbound");
       expect(inbound.query).toEqual({ page: "2", pageSize: "5" });
-      expect(inbound.params).toEqual({});
+    });
+
+    it("logs a CORS preflight, which never reaches a route", async () => {
+      const { app, records } = harness();
+
+      await request(app)
+        .options("/api/tasks")
+        .set("Origin", WEB_ORIGIN)
+        .set("Access-Control-Request-Method", "PATCH");
+
+      expect(lines(records, "inbound")).toHaveLength(1);
+      expect(lines(records, "outbound")[0]).toMatchObject({ status: 204 });
+    });
+
+    it("logs a body the parser refused, which never reaches a route either", async () => {
+      const { app, records } = harness();
+
+      const response = await request(app)
+        .post("/api/tasks")
+        .set("Content-Type", "application/json")
+        .send("{ not json");
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+      expect(lines(records, "inbound")).toHaveLength(1);
+      expect(lines(records, "outbound")[0]).toMatchObject({ status: 422 });
     });
 
     it("attaches the Actor's User ID to the same request id", async () => {

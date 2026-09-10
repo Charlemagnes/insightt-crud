@@ -19,7 +19,9 @@ const columns: NonNullable<TableProps<Task>["columns"]> = [
     dataIndex: "status",
     key: "status",
     width: 160,
-    render: (status: Task["status"]) => <Tag>{status.replace("_", " ")}</Tag>,
+    // A plain Tag until `TaskStatusTag` arrives with the transition tickets and
+    // gives each Status its colour and its label.
+    render: (status: Task["status"]) => <Tag>{status.replaceAll("_", " ")}</Tag>,
   },
   {
     title: "Created",

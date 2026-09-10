@@ -1,7 +1,14 @@
 import type { Task } from "@insightt/shared";
 
-/** What a list query needs to know. Every read is scoped to one Owner. */
-export interface TaskListQuery {
+/**
+ * What a list read needs to know. Every read is scoped to one Owner, which is
+ * why the Actor's `userId` sits alongside the paging rather than beside it.
+ *
+ * Deliberately not called `TaskListQuery`: PLAN.md §11 reserves that name for
+ * the shared Zod schema of the query *string* (`page`, `pageSize`, `status`,
+ * and no `userId` — a caller never gets to choose whose Tasks it reads).
+ */
+export interface OwnerScopedListQuery {
   userId: string;
   page: number;
   pageSize: number;
@@ -21,7 +28,7 @@ export interface TaskListResult {
  * stops at `mappers.ts`, one layer below (PLAN.md §11).
  */
 export interface TaskRepository {
-  list(query: TaskListQuery): Promise<TaskListResult>;
+  list(query: OwnerScopedListQuery): Promise<TaskListResult>;
 }
 
 /**
