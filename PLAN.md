@@ -3,6 +3,12 @@
 A task list with Auth0 authentication and task CRUD, built as a local monorepo:
 a Next.js SPA frontend and an Express REST API, backed by Supabase Postgres.
 
+Companion documents: `CONTEXT.md` (domain glossary), `docs/adr/0001` (backend
+framework), `docs/adr/0002` (Mark-as-Done mechanism).
+
+Budget: **24 hours**. Every decision below was taken with that in view; §18
+carries a pre-committed cut list for when it runs short.
+
 ---
 
 ## 1. Scope
@@ -20,16 +26,18 @@ a Next.js SPA frontend and an Express REST API, backed by Supabase Postgres.
 
 | Decision | Choice | Why |
 |---|---|---|
-| Backend framework | Express + TypeScript | Satisfies "a TypeScript backend web framework" unambiguously; keeps the API a real service rather than a Next.js BFF, and makes the backend unit test natural |
-| Deployment | **Local only** | No Vercel/hosting target for this exercise; both apps run via `npm run dev` |
-| Frontend rendering | Next.js as a client-rendered SPA | No SSR data fetching, no route handlers, no BFF. Avoids Ant Design SSR setup and keeps the REST boundary genuinely cross-process |
-| Styling | Ant Design only — **Tailwind removed** | One styling system; Tailwind's preflight reset collides with Ant Design's, and Tailwind was never a brief requirement |
+| Backend framework | Express + TypeScript | Satisfies "a TypeScript backend web framework" unambiguously; keeps the API a real service rather than a Next.js BFF, and makes the backend unit test natural. Full evaluation in ADR-0001 |
+| Deployment | **Local only** | A deliberate scope call: in 24 hours, hosting, DNS and env promotion are 2–4 hours that buy no requirement. No brief item asks for a live URL |
+| Frontend rendering | Next.js as a client-rendered SPA | No SSR data fetching, no route handlers, no BFF. Keeps the REST boundary genuinely cross-process |
+| Styling | Ant Design v6 only | One styling system. Tailwind is removed from the scaffold: antd's CSS-in-JS and Tailwind's preflight reset the same elements, and maintaining both earns nothing here |
 | Database | Supabase as plain Postgres, **RLS off** | Authorization enforced in the API layer, which leaves the Postgres function in §14 unconstrained |
-| Data access | Drizzle ORM over `node-postgres` | Real SQL semantics, real transactions, typed rows without hand-mapping, and `drizzle-kit` gives versioned `.sql` migrations — a schema story `pg` alone lacks. Rejected `supabase-js` because PostgREST DSL is a second query language and each call is its own transaction |
-| Type contract | Zod in `packages/shared` | Single source of truth for the wire shape, consumed by both apps |
-| Server state | TanStack Query | Owns fetched rows, caching, invalidation, optimistic updates |
+| Data access | Drizzle ORM over `node-postgres` | Real SQL semantics, real transactions, typed rows without hand-mapping, and `drizzle-kit` gives versioned `.sql` migrations. Rejected `supabase-js`: PostgREST DSL is a second query language and each call is its own transaction |
+| Type contract | Zod v4 in `packages/shared` | Single source of truth for the wire shape, consumed by both apps |
+| Server state | TanStack Query | Owns fetched rows, caching, invalidation, request deduplication |
 | Client state | Zustand | Owns session mirror and task-list view state — deliberately not the fetched rows |
-| Mark-as-Done mechanism | Express endpoint + Postgres function | The brief permits "Cloud Function **or** API web service, **or** a Custom Resolver". Local-only rules out a cloud function; this satisfies two of the three |
+| Mark-as-Done mechanism | Express endpoint + Postgres function | The brief permits "Cloud Function **or** API web service, **or** a Custom Resolver". Full evaluation, including the rejected Supabase Edge Function, in ADR-0002 |
+| Module system | `apps/api` is **CommonJS** | The brief mandates Jest. `ts-jest` on CJS is a four-line config; on ESM it needs `--experimental-vm-modules`, `extensionsToTreatAsEsm` and `.js` import suffixes |
+| Test runner | **Jest** | Mandated by brief item 11. `ts-jest` in `apps/api`, `next/jest` in `apps/web` |
 
 ---
 
@@ -39,31 +47,83 @@ a Next.js SPA frontend and an Express REST API, backed by Supabase Postgres.
 apps/web              Next.js 16 SPA
 apps/api              Express + TypeScript REST API
 packages/shared       Zod schemas, inferred types, status-transition rules
+docs/adr/             Architecture decision records
+scripts/              setup-auth0.sh
+CONTEXT.md            Domain glossary
 ```
 
-npm workspaces. Both apps depend on `packages/shared`; neither depends on the other.
+npm workspaces. Both apps depend on `@insightt/shared`; neither depends on the
+other. The root `package.json` is workspace declarations and orchestration
+scripts only — it is not itself an app.
+
+**Internal structure**, fixed now so naming is settled before hour one:
+
+```
+apps/api/src/     index.ts  env.ts
+                  db/{client,schema}.ts
+                  middleware/{auth,logging,validate,errors}.ts
+                  tasks/{routes,service,repository,mappers}.ts
+
+apps/web/src/     app/{layout,page}.tsx
+                  providers/{Auth0,Query,Antd}.tsx
+                  components/auth/    RequireAuth  LandingPanel
+                                      LoginButton  LogoutButton
+                  components/tasks/   TaskTable  TaskFormModal
+                                      TaskStatusTag  TaskActions  TaskFilters
+                  components/shared/  AppHeader  FullPageSpin
+                                      ErrorState  EmptyState
+                  api/{client,tasks}.ts
+                  hooks/{useTasks,useTaskMutations}.ts
+                  stores/{session,taskList}.ts
+
+packages/shared/  src/index.ts
+                  src/schemas/task.ts
+                  src/rules/transitions.ts
+```
+
+Components are grouped by the screen they belong to, with `shared/` for the
+pieces both screens reach for. `hooks/`, `stores/` and `api/` stay flat; there
+are four files between them and nesting would be ceremony.
+
+`tasks/mappers.ts` is kept even though it looks like ceremony — it is the file
+that makes §11's Drizzle-row-vs-wire-contract separation visible in ten seconds
+rather than taken on faith.
 
 ---
 
 ## 4. Stack
 
-**Frontend** — Next.js 16 (App Router, all pages client components), React 19,
-TypeScript strict, TanStack Query, Zustand, Ant Design, `@auth0/auth0-react`.
+**Frontend** — Next.js 16.3, React 19.2, TypeScript strict, TanStack Query,
+Zustand, **Ant Design v6**, `@auth0/auth0-react`.
 
-**Backend** — Node + Express, TypeScript strict, Drizzle ORM, `node-postgres`,
-`express-oauth2-jwt-bearer`, `cors`, Zod.
+**Backend** — Node + Express (CommonJS), TypeScript strict, Drizzle ORM,
+`node-postgres`, `express-oauth2-jwt-bearer`, `cors`, Zod v4.
 
 **Database** — Supabase Postgres, accessed over the Supavisor pooler in
 session mode (direct connections are IPv6-first; session mode rather than
 transaction mode because transaction mode does not support prepared statements).
 
-Notes to verify at install:
+Resolved install notes:
 
-- Ant Design's current major against React 19.2. If v5, add `@ant-design/v5-patch-for-react-19`.
-- Zod's current major — v4's `z.infer` and issue API differ from v3.
-- Ant Design style flash: add `@ant-design/nextjs-registry` in `layout.tsx`
-  (~10 lines). Next still prerenders client components at build time, so this
-  is cheaper than disabling prerendering with `dynamic(..., { ssr: false })`.
+- **Ant Design v6 supports React 19 natively.** Do *not* add
+  `@ant-design/v5-patch-for-react-19`; it exists only for v5.
+- **Zod v4 spellings**: `z.uuid()` and `z.iso.datetime()` are top-level,
+  `z.strictObject` exists, `z.toJSONSchema()` is built in. v3 differs.
+- **Style flash**: add `@ant-design/nextjs-registry` in `layout.tsx` (~10 lines).
+  Next still prerenders client components at build time, so this is cheaper than
+  disabling prerendering with `dynamic(..., { ssr: false })`.
+
+**Workspace wiring**: `packages/shared` exports raw TypeScript
+(`"exports": { ".": "./src/index.ts" }`) — no build step between packages.
+`apps/web` consumes it via `transpilePackages: ['@insightt/shared']`;
+`apps/api` runs on `tsx watch` in dev and resolves it in Jest via
+`moduleNameMapper`.
+
+**Scaffold cleanup**: move `app/`, `public/`, `next.config.ts`, `tsconfig.json`
+and `eslint.config.mjs` into `apps/web/`. Delete `postcss.config.mjs`, the
+`@import "tailwindcss"` / `@theme inline` block in `globals.css`, and the
+`tailwindcss` + `@tailwindcss/postcss` dependencies. `next dev` will regenerate
+its AGENTS.md block under `apps/web/` — commit that alongside the move.
 
 ---
 
@@ -85,15 +145,35 @@ create table tasks (
 );
 
 create index tasks_owner_status_idx on tasks (owner_id, status);
+
+create function set_updated_at() returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+create trigger tasks_set_updated_at
+  before update on tasks
+  for each row execute function set_updated_at();
 ```
+
+The trigger matters: without it `updated_at` reads as the creation time forever,
+because nothing in the application ever assigns it. With it, `PATCH`, the
+guarded transition updates and `mark_task_done()` all maintain it without any of
+them remembering to.
 
 Schema lives in `apps/api/src/db/schema.ts` (Drizzle `pgTable`, `pgEnum`);
 migrations in `apps/api/drizzle/`, generated by `drizzle-kit` and hand-extended
-with the `mark_task_done` function.
+with the trigger and the `mark_task_done` function.
 
-**Ownership isolation.** Every query filters on `owner_id = <auth sub>`. A user
-can only ever see their own tasks. A task belonging to someone else returns
+**Ownership isolation.** Every query filters on `owner_id = <Actor's userId>`. A
+user can only ever see their own tasks. A task belonging to someone else returns
 `404`, never `403`, so existence is not leaked.
+
+**Naming.** `owner_id` stores the Auth0 `sub` claim. Above the auth boundary the
+value is called `userId` throughout — the raw claim is read exactly once, in the
+auth middleware. `id` always means a Task's id. See `CONTEXT.md`.
 
 ---
 
@@ -101,26 +181,58 @@ can only ever see their own tasks. A task belonging to someone else returns
 
 JSON REST. All routes require a valid Auth0 access token.
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/tasks` | Owner-scoped list; `page`, `pageSize`, `status`, `sort` |
-| `GET` | `/api/tasks/:id` | Single task |
-| `POST` | `/api/tasks` | Create, always as `PENDING` |
-| `PATCH` | `/api/tasks/:id` | Edit title/description; requires `If-Match: <version>` |
-| `POST` | `/api/tasks/:id/start` | `PENDING → IN_PROGRESS` |
-| `POST` | `/api/tasks/:id/done` | `IN_PROGRESS → DONE`, idempotent |
-| `POST` | `/api/tasks/:id/archive` | `DONE → ARCHIVED` |
-| `DELETE` | `/api/tasks/:id` | Delete |
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| `GET` | `/api/tasks` | Owner-scoped list; `page`, `pageSize`, `status` | `200` + `Paginated<Task>` |
+| `GET` | `/api/tasks/:id` | Single task | `200` + `Task` + `ETag` |
+| `POST` | `/api/tasks` | Create, always as `PENDING` | `201` + `Task` |
+| `PATCH` | `/api/tasks/:id` | Edit title/description; requires `If-Match` | `200` + `Task` |
+| `POST` | `/api/tasks/:id/start` | `PENDING → IN_PROGRESS` | `200` + `Task` |
+| `POST` | `/api/tasks/:id/done` | `IN_PROGRESS → DONE`, idempotent | `200` + `Task` |
+| `POST` | `/api/tasks/:id/archive` | `DONE → ARCHIVED` | `200` + `Task` |
+| `DELETE` | `/api/tasks/:id` | Delete, allowed from any status | `204` |
 
 State changes are dedicated endpoints rather than `PATCH { status }`, which
-keeps the transition rules and the idempotent Done path explicit.
+keeps the transition rules and the idempotent Done path explicit and leaves
+`mark_task_done()` as the only entrance to `DONE`. The transition endpoints take
+**no request body** — the target status is in the path, so there is nothing to
+validate and nothing a client can contradict.
+
+Every mutation except `DELETE` returns the full `Task`, because §12's optimistic
+updates overwrite the cache from the response body so `version` self-corrects.
+
+**Optimistic concurrency.** `GET /api/tasks/:id` and every mutation response
+carry `ETag: "<version>"`. `PATCH` requires `If-Match`:
+
+| Condition | Response |
+|---|---|
+| `If-Match` absent | `428` `PRECONDITION_REQUIRED` |
+| `If-Match` stale | `412` `VERSION_CONFLICT` |
+
+`412` rather than `409` so the frontend can tell "someone else changed this" from
+"that action isn't allowed here" without string-matching a message.
 
 **Pagination.** Offset-based, since Ant Design's `Table` needs a total count.
 The list query selects `count(*) over() as total` alongside the rows, so one
-round trip returns both.
+round trip returns both. `page` defaults to 1; `pageSize` defaults to 10 and
+caps at 100; `status` is optional with **no default**, so the list shows every
+status unless filtered. Ordering is fixed `created_at desc`.
 
 **Response envelope.** Lists return `{ items, page, pageSize, total }`.
 Errors return `{ error: { code, message, details? } }`.
+
+**Error codes**, frozen as a Zod enum in `packages/shared`:
+
+| `code` | HTTP | Raised when |
+|---|---|---|
+| `UNAUTHENTICATED` | 401 | missing, invalid or expired token |
+| `NOT_FOUND` | 404 | no such task, or not owned by the Actor |
+| `VALIDATION_FAILED` | 422 | payload fails Zod; `details` carries `error.issues` |
+| `FIELD_NOT_EDITABLE` | 422 | field not mutable in the task's current status |
+| `INVALID_TRANSITION` | 409 | transition not permitted from the current status |
+| `VERSION_CONFLICT` | 412 | `If-Match` present but stale |
+| `PRECONDITION_REQUIRED` | 428 | `PATCH` sent without `If-Match` |
+| `INTERNAL` | 500 | anything unhandled |
 
 ---
 
@@ -133,18 +245,28 @@ PENDING → IN_PROGRESS → DONE → ARCHIVED
 ```
 
 No skipping steps, no reverts, `ARCHIVED` is terminal. Every other transition
-is rejected with `409`. The machine and its `canTransition()` /
-`canEdit(task, field)` helpers live in `packages/shared/rules/transitions.ts`
-so the frontend can disable impossible actions using the same rules the API
-enforces.
+is rejected with `409 INVALID_TRANSITION`. The machine and its
+`canTransition()` / `canEdit(task, field)` helpers live in
+`packages/shared/src/rules/transitions.ts` so the frontend can disable
+impossible actions using the same rules the API enforces.
 
 **Only the owner can mark a task DONE.** Satisfied structurally — tasks are
 owner-scoped end to end, so a non-owner cannot address the task at all.
 
-**A DONE task is frozen except for the title.** `title` is the sole mutable
-field once status is `DONE`; any other field present in the payload is
-rejected with `422`. This is a documented field whitelist — no typo-detection
-heuristic, no similarity threshold.
+**Field mutability by status.** A documented whitelist; no typo-detection
+heuristic, no similarity threshold. Anything outside it is
+`422 FIELD_NOT_EDITABLE`.
+
+| Status | Edit title | Edit description | Delete | Next transition |
+|---|---|---|---|---|
+| `PENDING` | yes | yes | yes | `→ IN_PROGRESS` |
+| `IN_PROGRESS` | yes | yes | yes | `→ DONE` |
+| `DONE` | yes (typo fix) | **no** | yes | `→ ARCHIVED` |
+| `ARCHIVED` | **no** | **no** | yes | terminal |
+
+Delete is unrestricted because the brief says "Delete Task" flat; inventing a
+restriction it does not ask for would be a worse deviation than allowing it.
+`ARCHIVED` is not hidden from the list — it is a status, not a soft delete.
 
 ---
 
@@ -172,42 +294,85 @@ discriminated outcome:
 |---|---|
 | `completed` | `200` + task |
 | `replayed` (already `DONE`) | `200` + task, `X-Idempotent-Replay: true` |
-| `wrong_status` | `409` |
-| `not_found` (missing or not owned) | `404` |
+| `wrong_status` | `409 INVALID_TRANSITION` |
+| `not_found` (missing or not owned) | `404 NOT_FOUND` |
 
 Two simultaneous requests: one wins the row lock and completes the task, the
 loser matches zero rows, observes `DONE`, and returns the identical `200`. No
 double completion, no overwritten `completed_at`.
 
+**Other transitions.** `/start` and `/archive` use a guarded Drizzle
+`UPDATE ... WHERE id = ? AND owner_id = ? AND status = ?` — still atomic, no
+function needed. `/done` is the one that needs the function, because it is the
+one that must distinguish a replay from a rejection.
+
 **Edit concurrency.** `PATCH` uses optimistic locking on `version` via
-`If-Match`. A stale version returns `409` rather than silently clobbering.
+`If-Match`. A stale version returns `412` rather than silently clobbering.
 
 ---
 
 ## 9. Logging
 
-One Express middleware, mounted **after** auth so the actor is resolved,
-emitting structured JSON **to the console only** (no audit table):
+Structured JSON to the console only (no audit table), in two middlewares:
 
-- **Inbound** — ISO timestamp, request id, actor (Auth0 `sub`), method, path,
-  route params, query params, headers, body
-- **Outbound** — status code, duration in ms, error class on failure
+- **Inbound, mounted *before* auth** — ISO timestamp, request id
+  (`crypto.randomUUID()`), `userId: null`, method, path, route params, query
+  params, headers, body (truncated at ~1KB)
+- **Actor stamp, mounted *after* auth** — attaches the resolved `userId` to the
+  same request id
+- **Outbound**, on the response hook — status code, duration in ms, error class
+  on failure
 - **Redacted** — `authorization`, `cookie`, `set-cookie` → `[REDACTED]`
 
-Every request passes through it, including the Done endpoint.
+Mounting inbound before auth is deliberate. The brief asks to log *all* api
+activities, with headers as input and status code as output; a rejected request
+is an api activity, it has headers, and `401` is a status code. Mounted only
+after `express-oauth2-jwt-bearer`, none of those requests would produce a log
+line at all — and "send a bad token, check the log" is the first thing a
+reviewer tries. An unauthenticated request logs `userId: null`, which is
+information, not a gap.
 
 ---
 
 ## 10. Authentication — Auth0
 
 - `@auth0/auth0-react` in the SPA: Authorization Code + PKCE, `audience` set to
-  the API identifier, RS256.
-- The access token is held **in memory**, not `localStorage`. Renewal via
-  silent auth / rotating refresh tokens.
-- Every API request carries `Authorization: Bearer <access token>`.
+  the API identifier, RS256, **Universal Login** (Auth0 hosts the login and
+  signup screens; the app never sees a password and builds no credential form).
+- `cacheLocation: 'localstorage'` with `useRefreshTokens: true` and rotation, so
+  the session survives a page reload. The alternative — in-memory caching — puts
+  the refresh token in memory too, so a reload falls back to hidden-iframe silent
+  auth, which is blocked in Safari and Brave. Tokens in `localStorage` are
+  XSS-reachable; that trade is made deliberately and noted in the README.
+- Every API request carries `Authorization: Bearer <access token>`, fetched via
+  `getAccessTokenSilently()` on **every** call (the SDK returns the cached token
+  and refreshes only when needed, so it is cheap).
+- A `401` response triggers `loginWithRedirect()`. No retry loop, no interceptor
+  state machine.
 - `express-oauth2-jwt-bearer` validates against the tenant JWKS. Unauthenticated
   requests are rejected before any handler runs.
-- Actor identity throughout the backend is the `sub` claim.
+- Actor identity throughout the backend is `Actor = { userId }`, read once from
+  `req.auth.payload.sub`.
+
+**Tenant setup** — three applications, one connection. `scripts/setup-auth0.sh`
+walks it and writes the env files.
+
+1. **API** — identifier becomes `AUTH0_AUDIENCE`, signing algorithm RS256.
+2. **SPA application** — used by the browser. Callback, logout and web origin
+   all `http://localhost:3000`.
+3. **Regular Web Application** — used *only* by Cypress. Advanced Settings →
+   Grant Types → enable **Password**. Auth0 does not offer the Password grant on
+   the SPA application type, so the E2E test cannot reuse the SPA client.
+4. **Database connection** (`Username-Password-Authentication`) with one
+   manually created test user. **All social connections disabled** — `sub` is
+   connection-scoped, so the same human logging in via Google and via
+   email/password would be two different Owners with two disjoint task lists,
+   which reads as data loss.
+5. Signups left **enabled** so a reviewer can register and click around.
+
+**Callback handling.** The callback URL is `http://localhost:3000` itself; there
+is no `/callback` route. `onRedirectCallback` calls `window.history.replaceState`
+to strip `?code=` and `?state=`.
 
 **CORS, not a proxy.** The apps are separate origins and there is no BFF, so
 Express enables CORS directly — a dev proxy would only hide it while putting
@@ -218,35 +383,90 @@ cookies, so no `credentials: 'include'` and no `SameSite` concerns.
 cors({
   origin: 'http://localhost:3000',
   allowedHeaders: ['Authorization', 'Content-Type', 'If-Match'],
-  exposedHeaders: ['X-Idempotent-Replay'],
+  exposedHeaders: ['X-Idempotent-Replay', 'ETag'],
 })
 ```
 
-`exposedHeaders` matters — without it the browser strips
-`X-Idempotent-Replay` and the frontend cannot distinguish a replay from a
-fresh completion.
+`exposedHeaders` matters twice over: neither `X-Idempotent-Replay` nor `ETag` is
+CORS-safelisted, so without it the browser strips both — the frontend could
+neither distinguish a replay from a fresh completion nor read the version it
+needs for the next `If-Match`.
 
 ---
 
 ## 11. Shared contracts — Zod
 
 `packages/shared` is the type authority for anything crossing the wire.
-Nothing is hand-typed twice.
+Nothing is hand-typed twice. Wire shapes are camelCase; timestamps are ISO
+strings, not `Date`, so JSON round-trips are lossless and the same schema parses
+on both sides.
 
-```
-schemas/task.ts        TaskSchema, TaskStatus, CreateTaskInput,
-                       UpdateTaskInput, TaskListQuery, Paginated<T>, ApiError
-rules/transitions.ts   the linear state machine, canTransition, canEdit
+```ts
+export const TaskStatus = z.enum(['PENDING', 'IN_PROGRESS', 'DONE', 'ARCHIVED']);
+
+const title       = z.string().trim().min(1, 'Title is required').max(200);
+const description = z.string().trim().max(2000)
+                     .transform(v => (v === '' ? null : v)).nullable();
+
+export const TaskSchema = z.object({
+  id: z.uuid(),
+  title: z.string(),
+  description: z.string().nullable(),
+  status: TaskStatus,
+  version: z.number().int(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  completedAt: z.iso.datetime().nullable(),
+});
+
+export const CreateTaskInput = z.strictObject({
+  title,
+  description: description.optional(),          // omitted -> null
+});
+
+export const UpdateTaskInput = z.strictObject({
+  title: title.optional(),
+  description: description.optional(),
+}).refine(v => v.title !== undefined || v.description !== undefined,
+          { message: 'At least one field must be provided' });
+
+export const TaskListQuery = z.object({
+  page:     z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  status:   TaskStatus.optional(),
+});
+
+export const TaskIdParam = z.object({ id: z.uuid() });
+
+export const ErrorCode = z.enum([
+  'UNAUTHENTICATED', 'NOT_FOUND', 'VALIDATION_FAILED', 'FIELD_NOT_EDITABLE',
+  'INVALID_TRANSITION', 'VERSION_CONFLICT', 'PRECONDITION_REQUIRED', 'INTERNAL',
+]);
 ```
 
-- Types are `z.infer<typeof …>`, never declared separately.
+Notes that carry weight:
+
+- **`status` is absent from both input shapes.** A task is always created
+  `PENDING` and only ever moves through the dedicated transition endpoints. If
+  `status` were writable through `POST` or `PATCH`, a client could skip the
+  state machine entirely and `mark_task_done()` would stop being the only
+  entrance to `DONE` — which §8's idempotency guarantee depends on.
+- **`.strictObject`** is what turns a stray `status` key into
+  `422 VALIDATION_FAILED` rather than a silently ignored field.
+- **`description` accepts explicit `null`** on update, because omitting the key
+  means "leave it alone" — clearing a description needs a way to say so.
+- **`TaskIdParam` parses the id as a UUID**, so a malformed id returns `404`
+  instead of reaching Postgres and producing a `500`.
+- **`z.coerce`** on the query params, because query strings arrive as strings.
+
+Consumption:
+
 - **Backend** — a `validate({ body, query, params })` middleware parses into
   `req.valid`, so handlers only ever receive validated, fully typed input. A
   malformed payload never reaches a handler.
 - **Frontend** — the same schemas parse responses inside the TanStack Query
   `queryFn`, so a backend shape change surfaces as an error at the boundary
-  instead of an `undefined` deep in a component. Query generics come from the
-  parse for free.
+  instead of an `undefined` deep in a component.
 - **Ant Design forms** — `Form` does not consume Zod natively. One helper:
   `safeParse` on submit, map `error.issues` onto `form.setFields`. No per-field
   `validator` wiring.
@@ -257,12 +477,18 @@ These are not the same thing and must not be collapsed:
 - **Drizzle types** describe the DB row — snake_case columns, DB nullability.
   Internal to `apps/api`.
 - **Zod types** describe the API contract. Shared with the frontend.
-- The repository layer maps between them.
+- `apps/api/src/tasks/mappers.ts` maps between them.
 
 Do **not** use `drizzle-zod` for the shared schemas. It inverts the direction —
 the public API shape becomes a projection of the table shape — and because it
 emits runtime schemas, `packages/shared` would depend on the DB schema module,
 dragging the database layer into the frontend's import graph.
+
+**Not in `packages/shared`:** the user profile. `AuthUser = { userId, name,
+email }` lives in `apps/web`, and `Actor = { userId }` in `apps/api`. Neither
+crosses the wire — the API never returns a user, it only reads the token — and
+keeping them out preserves the rule that everything in `shared` is a wire
+contract.
 
 ---
 
@@ -270,74 +496,112 @@ dragging the database layer into the frontend's import graph.
 
 Two stores, kept off TanStack Query's territory.
 
-**`useSessionStore`** — mirrors Auth0: `user`, `isAuthenticated`, `isLoading`,
-and a `getAccessToken` **function reference** (not a token string — a cached
-string goes stale on silent refresh). This is the real win: the API client
-reads the token from the store instead of needing hooks, so the `fetch` wrapper
-stays a plain function.
+**`useSessionStore`** — mirrors Auth0: `user: AuthUser | null`,
+`isAuthenticated`, `isLoading`, and a `getAccessToken` **function reference**
+(not a token string — a cached string goes stale on silent refresh). This is the
+real win: the API client reads the token from the store instead of needing
+hooks, so the `fetch` wrapper stays a plain function.
 
 **`useTaskListStore`** — the list's *view* state: `page`, `pageSize`,
-`statusFilter`, `sort`, `selectedTaskId`, `drawerOpen`, `editingTaskId`.
+`statusFilter`, `selectedTaskId`, `editingTaskId`.
 
 **The fetched task array stays in TanStack Query, not in Zustand.** Query
-already caches, invalidates and optimistically updates it; duplicating it into
-a store means two caches to reconcile on every mutation, and the replay-`200`
-path gets materially harder. Instead the Zustand params *are* the query key —
-`['tasks', { page, pageSize, statusFilter, sort }]` — so changing a filter
-refetches automatically. Zustand owns "what the user is looking at"; Query owns
-the rows.
+already caches, invalidates and deduplicates it; duplicating it into a store
+means two caches to reconcile on every mutation, and the replay-`200` path gets
+materially harder. Instead the Zustand params *are* the query key —
+`['tasks', { page, pageSize, statusFilter }]` — so changing a filter refetches
+automatically. Zustand owns "what the user is looking at"; Query owns the rows.
+
+**Mutation policy.**
+
+- Per-row mutations (`PATCH`, `/start`, `/done`, `/archive`, `DELETE`) are
+  **optimistic**: `onMutate` snapshots the cache, `onError` restores it, and
+  `onSuccess` overwrites the row from the response body so `version`
+  self-corrects and the next `If-Match` is never stale.
+- **Create is not optimistic.** Under `created_at desc` pagination a new task's
+  position is not knowable client-side and `total` cannot be adjusted correctly
+  across pages, so create simply invalidates.
+- `onSettled: invalidateQueries` on every mutation, so `total` reconciles.
+- A `412 VERSION_CONFLICT` invalidates and raises a `notification.warning` —
+  "this task changed elsewhere, refreshed" — rather than silently rolling back.
+  Two browser tabs make the concurrency design visible.
 
 ---
 
 ## 13. Frontend structure
 
+One route, `/`. Two screens: a logged-out landing panel and the task list.
+`RequireAuth` fires `loginWithRedirect()` when `!isLoading && !isAuthenticated`.
+
 - `Table` for the list, with server-driven pagination wired to `useTaskListStore`
 - `Form` + `Modal` for create and edit
-- `Drawer` for task detail — avoids dynamic route segments entirely
 - `Tag` for status, `Popconfirm` for delete, `message` / `notification` for outcomes
-- Action buttons are enabled/disabled by `canTransition()` from
+- Action buttons are enabled/disabled by `canTransition()` and `canEdit()` from
   `packages/shared`, so the UI never offers an action the API will reject
 - The Done mutation treats a replayed `200` as success, not an error
-- Client-side auth guard: unauthenticated users are redirected to Auth0 login
+
+**UX states.** The evaluation criteria name "Loading indicators, proper UX", so
+every moment is specified rather than left to the component defaults:
+
+| Moment | Behaviour |
+|---|---|
+| Auth0 `isLoading` | full-page `Spin`, no layout flash |
+| Unauthenticated | `LandingPanel` with a single "Log in" button |
+| List first load | `Table loading={isPending}` |
+| List page change | `placeholderData: keepPreviousData` — the table dims instead of emptying |
+| Zero tasks | `Empty` with a "Create your first task" CTA |
+| Fetch error | `Alert type="error"` with Retry wired to `refetch()` |
+| Mutation in flight | `loading` + `disabled` on the submitting button; `Popconfirm okButtonProps={{ loading }}` |
+| Mutation outcome | `message.success` / `message.error` |
+| `412 VERSION_CONFLICT` | `notification.warning`, "this task changed elsewhere — refreshed" |
+
+Because per-row mutations are optimistic, their spinners are near-invisible; the
+indicators that actually get seen are app boot, first load, page change and
+create. Build them anyway.
 
 ---
 
 ## 14. Mark-as-Done mechanism
 
 `POST /api/tasks/:id/done` — the Express API web service — delegates to
-`mark_task_done(p_task_id uuid, p_actor text)`, a `SECURITY DEFINER` Postgres
-function, which is the brief's **custom resolver** option.
+`mark_task_done(p_task_id uuid, p_actor text)`, a Postgres function, which is
+the brief's **custom resolver** option. Between them the two satisfy both
+options brief item 10 offers. Full evaluation in **ADR-0002**.
 
-The function performs the conditional `UPDATE … RETURNING` from §8 and, when it
+The function performs the conditional `UPDATE ... RETURNING` from §8 and, when it
 affects zero rows, reads the row **within the same transaction** to determine
 the outcome, returning a discriminated result the endpoint maps to a status
 code. Called from Drizzle via:
 
 ```ts
-db.execute(sql`select * from mark_task_done(${id}, ${actor})`)
+db.execute(sql`select * from mark_task_done(${id}, ${actor.userId})`)
 ```
 
 with the result Zod-parsed at the repository boundary, since `db.execute`
-returns loosely typed rows.
+returns loosely typed rows. `COMMENT ON FUNCTION mark_task_done IS '...'`
+documents the four outcomes where the next person will look for them.
 
-Why not a cloud function: this project runs locally, so there is no Vercel
-runtime to host one. A Supabase Edge Function was rejected because it
-reintroduces a Deno runtime, duplicates JWT verification and logging, and adds
-a network hop to wrap a function that already exists. The brief's `or` makes
-the web-service-plus-custom-resolver combination sufficient.
+The function is **not** `SECURITY DEFINER`. With RLS off and the API connecting
+on a role that already owns `tasks`, that qualifier changes no behaviour; it
+would be a phrase with nothing behind it.
 
 ---
 
 ## 15. Tests
 
-Three, per the requirement — noting that "a backend unit test written with
-React Testing Library" is not achievable, since RTL renders DOM components and
-cannot exercise Express or Node code. Split accordingly:
+Three, per brief item 11 — noting that "a backend unit test written with React
+Testing Library" is not achievable, since RTL renders DOM components and cannot
+exercise Express or Node code. Split accordingly, and the README says so, since
+that is the reviewer's most likely objection.
 
 **1. Unit — Jest, no RTL** (`packages/shared` + `apps/api`)
 The transition validator and the `markAsDone` service against a mocked
 repository: every legal transition, every rejected transition, the already-DONE
-idempotent path, the non-owner path, the DONE-task field whitelist.
+idempotent path, the non-owner path, and the per-status field whitelist. Plus a
+drift test asserting the shared machine permits exactly the transition
+`mark_task_done`'s SQL hardcodes — the rule is deliberately written in two
+languages (TypeScript for the pre-check and the UI, SQL for atomic enforcement),
+so a test has to hold them together.
 
 **2. Integration — Jest + React Testing Library + MSW** (`apps/web`)
 The task list component. MSW mocks `GET /api/tasks` and
@@ -345,39 +609,59 @@ The task list component. MSW mocks `GET /api/tasks` and
 replayed `200` is handled as success rather than surfaced as an error.
 
 **3. E2E — Cypress**
-The login flow. Auth0's hosted login is cross-origin and flaky under Cypress,
-so use programmatic login (Resource Owner Password Grant against a dev-tenant
-test user) to seed the session, with `cy.origin()` as the fallback if ROPG is
-disabled on the tenant.
+The login flow, using the Regular Web Application from §10 with
+`grant_type: http://auth0.com/oauth/grant-type/password-realm` and an explicit
+`realm`, which sidesteps the tenant's Default Directory setting entirely. The
+token is written straight into the
+`@@auth0spajs@@::<clientId>::<audience>::<scope>` localStorage key, so the app
+boots already authenticated with no cross-origin redirect. The spec stays
+**read-only** — log in, assert the list renders — so there is no teardown.
+`cy.origin()` is the fallback if the Password grant cannot be enabled.
 
-Config: `next/jest` in `apps/web`, `ts-jest` in `apps/api`.
+Config: `next/jest` in `apps/web`, `ts-jest` (CJS preset) in `apps/api`.
+
+**Known landmine, budget an hour:** MSW v2 is ESM-first and needs polyfills
+under Jest + jsdom (`TextEncoder`, `TransformStream`, `BroadcastChannel`,
+`fetch`). `next/jest` covers some; `jest-fixed-jsdom` as the test environment
+covers the rest.
 
 ---
 
 ## 16. Local development
 
 ```bash
-npm install              # workspace install at the root
-npm run dev              # Express on :4000, Next on :3000, concurrently
-npm run db:generate      # drizzle-kit — generate a migration from schema.ts
-npm run db:migrate       # apply migrations
-npm run test             # unit + integration
-npm run test:e2e         # Cypress
+npm install                    # workspace install at the root
+bash scripts/setup-auth0.sh    # one-time Auth0 tenant + env setup
+npm run dev                    # Express on :4000, Next on :3000, concurrently
+npm run db:generate            # drizzle-kit — generate a migration from schema.ts
+npm run db:migrate             # apply migrations
+npm run test                   # unit + integration
+npm run test:e2e               # Cypress
+npm run docs:api               # z.toJSONSchema() -> docs/openapi.json
 ```
 
 Environment:
 
-| App | Variables |
+| File | Variables |
 |---|---|
-| `apps/api` | `DATABASE_URL` (Supavisor session-mode string), `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `PORT`, `WEB_ORIGIN` |
-| `apps/web` | `NEXT_PUBLIC_AUTH0_DOMAIN`, `NEXT_PUBLIC_AUTH0_CLIENT_ID`, `NEXT_PUBLIC_AUTH0_AUDIENCE`, `NEXT_PUBLIC_API_URL` |
+| `apps/api/.env` | `DATABASE_URL` (Supavisor session-mode string), `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `PORT`, `WEB_ORIGIN` |
+| `apps/web/.env.local` | `NEXT_PUBLIC_AUTH0_DOMAIN`, `NEXT_PUBLIC_AUTH0_CLIENT_ID`, `NEXT_PUBLIC_AUTH0_AUDIENCE`, `NEXT_PUBLIC_API_URL` |
+| `cypress.env.json` | `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_REALM`, `CYPRESS_CLIENT_ID`, `CYPRESS_CLIENT_SECRET`, `AUTH0_TEST_EMAIL`, `AUTH0_TEST_PASSWORD` |
 
-Auth0 setup: one SPA application (callback/logout URLs on `localhost:3000`) and
-one API (identifier used as the audience, RS256).
+All three are gitignored. `.env.example` files ship with the repo and the README
+documents the setup path; the deployment target is local, so whoever reviews
+this runs it themselves.
 
-Cleanup from the scaffold: remove `@import "tailwindcss"` and the `@theme inline`
-block from `app/globals.css`, drop the Tailwind dependencies, and delete the
-Tailwind section from `CLAUDE.md`.
+**Documentation deliverables:**
+
+- **README** — setup, env vars, the item 3 and item 10 evaluations (linking to
+  the ADRs), the concurrency design, the tokens-in-`localStorage` trade, and the
+  reading of "a backend unit test written with React Testing Library".
+- **TSDoc** on `packages/shared` exports, the repository layer, and the three
+  middlewares. Not on every React component, where it reads as padding.
+- **Inline comments** explain *why* only.
+- **`docs/openapi.json`**, generated from the same Zod schemas that validate
+  requests, so it cannot drift. Swagger UI at `/api/docs` in dev only.
 
 ---
 
@@ -386,7 +670,8 @@ Tailwind section from `CLAUDE.md`.
 | Requirement | Where satisfied |
 |---|---|
 | Task CRUD | §6 |
-| Mark as Done via cloud function / web service / custom resolver | §14 — web service + custom resolver |
+| Mark as Done via cloud function / web service / custom resolver | §14, ADR-0002 — web service + custom resolver |
+| Evaluate Express vs Next BFF | ADR-0001 |
 | Next.js + TypeScript + TanStack Query frontend | §4, §13 |
 | TypeScript backend framework | §4 — Express |
 | JSON REST between frontend and backend | §6 |
@@ -398,20 +683,46 @@ Tailwind section from `CLAUDE.md`.
 | Only owner can mark DONE | §5, §7 |
 | DONE not editable except title | §7 |
 | No double-DONE, concurrent-safe, idempotent | §8 |
-| API activity logging middleware with actor + timestamp | §9 |
-| Component library | §4, §13 — Ant Design |
+| API activity logging with actor + timestamp | §9 |
+| Component library | §4, §13 — Ant Design v6 |
 | Two-plus automated tests | §15 — three |
+
+Evaluation criteria:
+
+| Criterion | Where satisfied |
+|---|---|
+| Functionality | §1, §6, traceability above |
+| Code structure, naming and organization | §3, §11 two type layers, `CONTEXT.md` |
+| Data validation | §11 |
+| User experience: loading indicators, proper UX | §13 UX states |
+| Code documentation | §16 documentation deliverables |
+| Tests | §15 |
 
 ---
 
 ## 18. Build order
 
-1. Workspace scaffold — npm workspaces, TS configs, `packages/shared` skeleton
+1. Workspace scaffold — npm workspaces, TS configs, move the Next app into
+   `apps/web`, strip Tailwind, `packages/shared` skeleton
 2. Zod schemas and the transition rules, with their unit tests (test 1)
-3. Drizzle schema, migration, and `mark_task_done()`
-4. Express: auth middleware, logging middleware, validation middleware, CORS
-5. Task routes, repository layer, and the Done endpoint
-6. Auth0 SPA wiring, Zustand session store, typed API client
-7. Task list, forms, and drawer in Ant Design with TanStack Query
-8. Integration test (test 2), then Cypress login (test 3)
-9. README covering setup, the mechanism choice in §14, and the concurrency design
+3. Auth0 tenant via `scripts/setup-auth0.sh`
+4. Drizzle schema, migration, `set_updated_at()` trigger, `mark_task_done()`
+5. Express: logging middleware, auth middleware, actor stamp, validation
+   middleware, error mapper, CORS
+6. Task routes, repository layer, mappers, and the Done endpoint
+7. Auth0 SPA wiring, Zustand session store, typed API client
+8. Task list, forms, and the UX states in Ant Design with TanStack Query
+9. Integration test (test 2), then Cypress login (test 3)
+10. README, ADR polish, `npm run docs:api`
+
+**Cut list, pre-committed.** If hour 20 arrives with the UI half-done, drop in
+this order and stop when back on schedule:
+
+1. Server-side pagination — ship a fixed `created_at desc` list, let antd
+   `Table` paginate client-side
+2. The status filter UI — keep the API param, hardcode the default
+3. `docs/openapi.json` and Swagger UI
+
+**Tests are never cut.** Item 11 is the most mechanically checkable requirement
+in the brief; a reviewer diffing against it notices a missing Cypress spec faster
+than a missing filter.

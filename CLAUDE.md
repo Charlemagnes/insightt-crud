@@ -4,27 +4,108 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 @AGENTS.md
 
+## What this is
+
+A take-home task list: Auth0 authentication and task CRUD, as a local npm-workspaces
+monorepo — a Next.js SPA, an Express REST API, and a shared Zod contract package,
+backed by Supabase Postgres.
+
+**Read these before making design choices**, in this order:
+
+- `PLAN.md` — the implementation plan. Every architectural decision, with rationale.
+- `CONTEXT.md` — the domain glossary. Use its vocabulary; it is opinionated about
+  which words to avoid.
+- `docs/adr/` — the two decisions the brief asks to be justified explicitly.
+
+If a change contradicts any of the three, update the document in the same commit.
+
 ## Commands
 
 ```bash
-npm run dev     # dev server on :3000
-npm run build   # production build (also the only full type-check — tsconfig is noEmit)
-npm start       # serve the production build
-npm run lint    # eslint (flat config, no args needed)
+npm install                    # workspace install, from the root
+bash scripts/setup-auth0.sh    # one-time Auth0 tenant + env setup
+npm run dev                    # Express on :4000, Next on :3000, concurrently
+npm run build                  # production build (also the only full type-check)
+npm run lint                   # eslint (flat config, no args needed)
+npm run db:generate            # drizzle-kit — generate a migration from schema.ts
+npm run db:migrate             # apply migrations
+npm run test                   # Jest: unit (apps/api, packages/shared) + integration (apps/web)
+npm run test:e2e               # Cypress
+npm run docs:api               # z.toJSONSchema() -> docs/openapi.json
 ```
 
-No test runner is configured yet.
+## Layout
 
-## Stack
+```
+apps/web         Next.js 16 SPA — all pages are client components, one route: /
+apps/api         Express + TypeScript REST API (CommonJS)
+packages/shared  @insightt/shared — Zod schemas + the status transition rules
+docs/adr/        Architecture decision records
+scripts/         setup-auth0.sh
+```
 
-Next.js 16 App Router, React 19, TypeScript strict, Tailwind CSS v4. Everything currently lives in `app/` (`layout.tsx`, `page.tsx`, `globals.css`); there is no `src/` directory and no backend/data layer yet despite the repo name.
+Both apps depend on `@insightt/shared`; neither depends on the other. The root
+`package.json` is workspace declarations and orchestration only. `PLAN.md` §3 has
+the file-level structure inside each workspace — follow it rather than inventing
+folders.
 
-## Conventions that differ from older Next.js/Tailwind
+> Until step 1 of `PLAN.md` §18 is done, the Next scaffold is still at the repo
+> root (`app/`, `next.config.ts`). Moving it into `apps/web/` is the first task.
 
-- **Route prop types are global.** `layout.tsx` types its props as `LayoutProps<"/">` with no import — Next generates these from the route tree into `.next/types`. Use `PageProps<"/route">` / `LayoutProps<"/route">` for new routes rather than hand-written prop interfaces. They only exist after `next dev`/`next build` has run.
-- **Tailwind v4 is CSS-first.** There is no `tailwind.config.*`. Design tokens are declared in `app/globals.css` via `@import "tailwindcss"` plus an `@theme inline` block that maps CSS custom properties (`--background`, `--foreground`, the Geist font vars) into Tailwind color/font utilities. Add theme values there, not in a JS config.
-- **Dark mode is `prefers-color-scheme`-driven** through those `:root` custom properties, alongside `dark:` utilities used directly in components.
-- `@/*` path alias resolves to the repo root.
-- Fonts come from `next/font/google` in `app/layout.tsx` and are exposed as CSS variables on `<html>`.
+## Conventions
 
-Before writing Next.js code, consult `node_modules/next/dist/docs/` (see AGENTS.md) — v16 APIs differ from older releases.
+**Stack versions matter here.** Next 16, React 19.2, Ant Design **v6**, Zod **v4**.
+Consult `node_modules/next/dist/docs/` before writing Next code (see AGENTS.md) —
+v16 APIs differ from older releases.
+
+- **Ant Design v6 supports React 19 natively.** Do not add
+  `@ant-design/v5-patch-for-react-19`; it exists only for v5.
+- **Zod v4 spellings**: `z.uuid()` and `z.iso.datetime()` are top-level,
+  `z.strictObject` exists, `z.toJSONSchema()` is built in. Training data for v3
+  will be wrong.
+- **No Tailwind.** Ant Design is the only styling system. Do not reintroduce
+  `tailwindcss`, `postcss.config.mjs`, or `@import "tailwindcss"` — antd's
+  CSS-in-JS and Tailwind's preflight reset the same elements.
+- **Route prop types are global.** Next generates `PageProps<"/route">` /
+  `LayoutProps<"/route">` from the route tree into `.next/types`; use them rather
+  than hand-written prop interfaces. They only exist after `next dev`/`next build`.
+- **`apps/api` is CommonJS**, because the brief mandates Jest and `ts-jest` on ESM
+  is a config tarpit. Do not "modernise" it to ESM.
+- `packages/shared` exports raw TypeScript — no build step. `apps/web` consumes it
+  via `transpilePackages`, `apps/api` via `tsx` in dev and `moduleNameMapper` in Jest.
+- `@/*` resolves to each app's own root.
+- Fonts come from `next/font/google` in `apps/web/app/layout.tsx`, exposed as CSS
+  variables on `<html>`.
+
+## Domain rules that are easy to get wrong
+
+- **`userId`, never `sub` or `id`.** The Auth0 `sub` claim is read exactly once, in
+  the auth middleware, and is called `userId` everywhere above that boundary. `id`
+  always means a Task's id. The DB column is `owner_id`.
+- **The status machine is strictly linear**: `PENDING → IN_PROGRESS → DONE → ARCHIVED`.
+  No skipping, no reverts, `ARCHIVED` is terminal.
+- **`status` is not writable through any input schema.** Status changes go through
+  the dedicated endpoints (`/start`, `/done`, `/archive`) only, so that
+  `mark_task_done()` stays the single atomic entrance to `DONE`. Adding `status` to
+  `CreateTaskInput` or `UpdateTaskInput` breaks the idempotency guarantee.
+- **Two type layers, never collapsed.** Drizzle types describe DB rows (snake_case,
+  internal to `apps/api`); Zod types describe the wire contract (camelCase, shared).
+  `apps/api/src/tasks/mappers.ts` is the seam. Do not use `drizzle-zod` for the
+  shared schemas.
+- **Not-owned tasks return `404`, never `403`**, so existence is not leaked.
+- **`412` means stale `If-Match`; `409` means an illegal transition.** They are
+  different failures and the frontend branches on them.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub Issues in `Charlemagnes/insightt-crud`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
