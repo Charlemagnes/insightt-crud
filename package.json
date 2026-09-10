@@ -2,25 +2,19 @@
   "name": "insightt-crud",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "next": "16.3.4",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w @insightt/api\" \"npm run dev -w @insightt/web\"",
+    "build": "npm run build --workspaces --if-present",
+    "start": "npm run start -w @insightt/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.4",
-    "tailwindcss": "^4",
+    "concurrently": "^9.2.4",
     "typescript": "^5"
   }
 }

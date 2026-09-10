@@ -1,0 +1,16 @@
+/*
+ * Ant Design is the only styling system here (CLAUDE.md). This file holds the
+ * page-level reset antd does not cover; component styling belongs in antd's
+ * theme and its CSS-in-JS, not here.
+ */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+}
