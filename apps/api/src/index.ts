@@ -1,9 +1,30 @@
-import { SHARED_PACKAGE_NAME } from "@insightt/shared";
+import "dotenv/config";
+
+import { createApp } from "@/app";
+import { loadEnv } from "@/env";
+import { createAuthMiddleware } from "@/middleware/auth";
+import { consoleLogSink } from "@/middleware/logging";
+import { emptyTaskRepository } from "@/tasks/repository";
 
 /**
- * Entry point placeholder. Express, its middleware stack and the app factory
- * arrive in the tickets that follow (PLAN.md §18 steps 5-6); what this file
- * proves today is that the CommonJS API workspace resolves `@insightt/shared`
- * straight from source under `tsx`.
+ * The composition root: the one file that reads the environment, builds the
+ * real collaborators and starts listening. Everything it wires up is testable
+ * without it, which is why it stays this short.
  */
-console.log(`@insightt/api scaffold — linked against ${SHARED_PACKAGE_NAME}`);
+const env = loadEnv();
+
+const app = createApp({
+  taskRepository: emptyTaskRepository,
+  requireAuth: createAuthMiddleware(env),
+  webOrigin: env.webOrigin,
+});
+
+app.listen(env.port, () => {
+  consoleLogSink({
+    ts: new Date().toISOString(),
+    requestId: null,
+    direction: "startup",
+    message: `@insightt/api listening on http://localhost:${env.port}`,
+    webOrigin: env.webOrigin,
+  });
+});
