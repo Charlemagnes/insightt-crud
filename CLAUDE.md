@@ -25,13 +25,14 @@ If a change contradicts any of the three, update the document in the same commit
 npm install                    # workspace install, from the root
 bash scripts/setup-auth0.sh    # one-time Auth0 tenant + env setup
 npm run dev                    # Express on :4000, Next on :3000, concurrently
-npm run build                  # production build (also the only full type-check)
+npm run build                  # production build; type-checks every workspace first
+npm run typecheck              # the same check plus cypress/, which is not a workspace
 npm run lint                   # fans out to each workspace; eslint flat config in apps/web
 npm run db:generate            # drizzle-kit — generate a migration from schema.ts
 npm run db:migrate             # apply migrations
 npm run db:seed -- '<user id>' # demo Tasks under one Owner; add 'replace' to clear theirs first
 npm run test                   # Jest, per workspace: apps/api, packages/shared, apps/web
-npm run test:e2e               # Cypress — boots dev servers, runs the spec, stops them
+npm run test:e2e               # Cypress — boots both dev servers, runs the spec, stops them
 npm run docs:api               # z.toJSONSchema() -> docs/openapi.json
 ```
 

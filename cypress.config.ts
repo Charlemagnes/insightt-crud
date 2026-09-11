@@ -12,9 +12,10 @@ export default defineConfig({
     specPattern: "cypress/e2e/**/*.cy.ts",
     supportFile: "cypress/support/e2e.ts",
     fixturesFolder: false,
-    // The suite is read-only and runs against a real tenant; there is nothing
-    // to review frame by frame, and a video would record the seeded token.
+    // One spec that either passes or names the assertion it failed on. A
+    // recording of it would be a minute of a table not changing; the failure
+    // screenshot Cypress takes by default is left on, because that one is
+    // worth having.
     video: false,
-    screenshotOnRunFailure: false,
   },
 });

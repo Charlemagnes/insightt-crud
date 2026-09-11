@@ -9,7 +9,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "types": ["cypress", "node"]
+    "types": ["cypress"]
   },
   "include": ["**/*.ts", "../cypress.config.ts"]
 }

@@ -817,8 +817,14 @@ written under `::@@user@@` as well. And `checkSession()` returns early unless
 the `auth0.<clientId>.is.authenticated` cookie is set, which is why the seed
 sets that too.
 
+The spec cannot arrange the Tasks it asserts on, being read-only, so it asserts
+the stronger thing instead: the rows on screen are matched against the page the
+API just returned, row key by row key, and the pager against its total. That
+holds on a seeded account and an empty one, and neither passes by accident.
+
 `npm run test:e2e` is one command for the whole thing: `start-server-and-test`
-boots `npm run dev`, waits for :3000, runs the spec and stops both servers.
+boots `npm run dev`, waits for **both** :3000 and :4000, runs the spec and stops
+them again. Waiting on the browser alone would race the API's own boot.
 
 Config: `next/jest` in `apps/web` (`jest-fixed-jsdom`, with `jest.setup.ts`
 supplying the `NEXT_PUBLIC_*` values `config.ts` reads at import time, so the

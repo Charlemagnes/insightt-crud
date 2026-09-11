@@ -1,4 +1,10 @@
-import { mintToken, readTenant, seedSession, type Auth0User } from "./auth0";
+import {
+  decodeIdToken,
+  mintToken,
+  readAuth0Env,
+  seedSession,
+  type Profile,
+} from "./auth0";
 
 declare global {
   namespace Cypress {
@@ -9,7 +15,7 @@ declare global {
        * spec can assert on the person the app is showing rather than on a name
        * written down twice.
        */
-      signInAndVisit(path?: string): Chainable<Auth0User>;
+      signInAndVisit(path?: string): Chainable<Profile>;
     }
   }
 }
@@ -21,22 +27,17 @@ declare global {
  * after `cy.visit` and watch fail as a signed-out landing page.
  */
 Cypress.Commands.add("signInAndVisit", (path = "/") =>
-  readTenant().then((tenant) =>
-    mintToken(tenant).then((token) => {
-      // Filled in by `onBeforeLoad`, which Cypress runs during the visit below
-      // rather than before it — so the profile is only readable in the `.then`.
-      let user: Auth0User | undefined;
+  readAuth0Env().then((env) =>
+    mintToken(env).then((token) => {
+      // Decoded here rather than inside the seed, so the profile this yields is
+      // in hand before the visit rather than smuggled out of `onBeforeLoad`.
+      const decoded = decodeIdToken(token.id_token);
 
       return cy
         .visit(path, {
-          onBeforeLoad(win) {
-            user = seedSession(win, tenant, token);
-          },
+          onBeforeLoad: (win) => seedSession(win, env, token, decoded),
         })
-        .then(() => {
-          if (!user) throw new Error("The visit never seeded a session");
-          return user;
-        });
+        .then(() => decoded.profile);
     }),
   ),
 );
