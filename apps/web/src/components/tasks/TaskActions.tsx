@@ -41,7 +41,7 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
   const start = useStartTask();
   const done = useMarkTaskDone();
   const archive = useArchiveTask();
-  const remove = useDeleteTask();
+  const deletion = useDeleteTask();
 
   /**
    * Runs a Transition and says what happened. The success line is whatever the
@@ -86,7 +86,7 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
 
   const runDelete = () =>
     run(async () => {
-      await remove.mutateAsync(task.id);
+      await deletion.mutateAsync(task.id);
       return "Task deleted";
     }, "Could not delete the task");
 
@@ -125,8 +125,15 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
         // The loading state belongs on the confirm control, not the row's
         // button: the person is looking at the popover when the request goes,
         // and it is the control they pressed.
-        okButtonProps={{ danger: true, loading: remove.isPending }}
-        onConfirm={() => void runDelete()}
+        okButtonProps={{ danger: true, loading: deletion.isPending }}
+        // The promise is returned rather than discarded, and that is what makes
+        // the line above visible: antd closes the popover the moment `onConfirm`
+        // hands back anything that is not thenable, which would take the confirm
+        // control away before it could ever show a spinner. Returned, the
+        // popover stays until the request settles and a second press is ignored
+        // while it is in flight. `runDelete` reports its own failures, so it
+        // always resolves and the popover always closes.
+        onConfirm={() => runDelete()}
       >
         <Button size="small" danger>
           Delete

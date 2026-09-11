@@ -633,10 +633,16 @@ automatically. Zustand owns "what the user is looking at"; Query owns the rows.
 
 **Mutation policy.**
 
-- Per-row mutations (`PATCH`, `/start`, `/done`, `/archive`, `DELETE`) are
+- Per-row mutations (`PATCH`, `/start`, `/done`, `/archive`) are
   **optimistic**: `onMutate` snapshots the cache, `onError` restores it, and
   `onSuccess` overwrites the row from the response body so `version`
   self-corrects and the next `If-Match` is never stale.
+- **`DELETE` is optimistic too, but page-shaped rather than row-shaped.** The
+  row is taken out and `total` lowered with it, so the pager cannot offer a page
+  that is no longer there. There is no `onSuccess` correction: a `204` carries
+  no body, and the row it would have corrected is gone. Snapshot, rollback and
+  `onSettled` are the same, which is why the cache policy lives once in
+  `useOptimisticPage` and the per-row mutations are one caller of it.
 - **Create is not optimistic.** Under `created_at desc` pagination a new task's
   position is not knowable client-side and `total` cannot be adjusted correctly
   across pages, so create simply invalidates.

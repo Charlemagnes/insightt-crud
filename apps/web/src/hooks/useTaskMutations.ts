@@ -248,15 +248,12 @@ function withRow(
  *
  * Lowering `total` is not cosmetic: it is the number the pager sizes itself
  * from, and a count still claiming the deleted Task would offer a page that is
- * no longer there. It moves only if the row was actually on this page, so a
+ * no longer there. It moves only when the row was actually on this page, so a
  * delete the cache never held does not quietly lose a Task from the count.
  */
 function withoutRow(page: TaskPage, id: string): TaskPage {
   const items = page.items.filter((task) => task.id !== id);
+  const wasHere = items.length < page.items.length;
 
-  return {
-    ...page,
-    items,
-    total: page.total - (page.items.length - items.length),
-  };
+  return { ...page, items, total: wasHere ? page.total - 1 : page.total };
 }

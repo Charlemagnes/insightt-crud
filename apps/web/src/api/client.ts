@@ -42,9 +42,8 @@ export function jsonRequest(method: string, body: unknown): RequestInit {
 }
 
 /**
- * The one place a request reaches the API. It attaches the bearer token, parses
- * the response against the shared schema, and turns the error envelope into an
- * `ApiError`.
+ * A request, with its response parsed against the shared schema. This is what
+ * every call that expects a body uses; `apiSend` below does the request itself.
  *
  * Parsing here rather than in the component is the point: a backend shape
  * change surfaces at the boundary that owns the contract, instead of as an
@@ -82,12 +81,13 @@ export async function apiFetchWithHeaders<Output>(
 }
 
 /**
- * The request itself, up to and including the failure mapping, with the
- * response handed back unread.
+ * The one place a request reaches the API: it attaches the bearer token, sends
+ * the request, and turns an error envelope into an `ApiError`. The body is left
+ * unread, because not every response has one.
  *
- * Delete is the one call that uses it directly: the API answers `204`, and
+ * Delete is the only call that uses it directly. The API answers `204`, and
  * `response.json()` on an empty body throws — so a success would arrive as a
- * parse error about a Task that was removed exactly as asked. Everything else
+ * parse error about a Task that was deleted exactly as asked. Everything else
  * goes through the two wrappers above, which read and validate the body.
  */
 export async function apiSend(

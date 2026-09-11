@@ -72,15 +72,10 @@ export function updateTask({
 }
 
 /**
- * Deletes a Task. Allowed from every Status, including `ARCHIVED` — terminal
- * describes the Transitions a Task has left, not whether it can be removed.
+ * Deletes a Task, from any Status and with no Version (PLAN.md §6).
  *
- * No Version travels with it, unlike an edit: a delete overwrites nothing, so
- * there is no stale write for a precondition to refuse. A Task that is already
- * gone comes back `404`, not a success — deleting is not a Replay.
- *
- * Nothing is returned because the API answers `204`: the Task it described does
- * not exist any more.
+ * Nothing comes back, because the API answers `204`: the Task a body would have
+ * described does not exist any more. A Task that was already gone is `404`.
  */
 export async function deleteTask(id: string): Promise<void> {
   await apiSend(`/api/tasks/${id}`, { method: "DELETE" });

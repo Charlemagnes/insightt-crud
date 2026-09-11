@@ -135,19 +135,16 @@ export function createTaskRoutes(repository: TaskRepository): Router {
     sendTask(res, result.task);
   });
 
+  // No `If-Match`, unlike `PATCH`, and no Status guard, unlike the Transitions
+  // below — see `TaskRepository.delete` for why neither belongs here.
   router.delete("/:id", taskIdValidator, async (req, res) => {
-    // No `If-Match`, unlike `PATCH`. A Version guards an edit from overwriting
-    // words someone else wrote; a delete overwrites nothing, and refusing one
-    // because the title changed elsewhere would protect nothing and only leave
-    // the Task the Actor asked to be rid of (PLAN.md §6).
     const deleted = await repository.delete({
       userId: actorOf(req).userId,
       id: taskIdValidator.read(req).params.id,
     });
 
-    // Including a second delete of the same Task. It is not a Replay: Mark Done
-    // can repeat because the Task is still there to report as finished, and a
-    // deleted Task is not there to report anything about.
+    // Which covers a second delete of the same Task as well as one that was
+    // never the Actor's.
     if (!deleted) {
       throw new ApiError(404, "NOT_FOUND", "Task not found");
     }
