@@ -291,27 +291,7 @@ npm run test:e2e  # Cypress against the real Auth0 tenant
 
 375 Jest tests across three workspaces, plus one Cypress spec.
 
-### "A backend unit test written with React Testing Library"
-
-This is the requirement most likely to be read as unmet, so it is answered here
-rather than left to be discovered.
-
-**It is not achievable as written.** React Testing Library renders React
-components into a DOM. It has no way to exercise an Express route, a Postgres
-query or a Node module — there is nothing for it to render. Any code that RTL
-could test would be frontend code, at which point it is not a backend test.
-
-We read the requirement as two tests, and wrote both:
-
-1. **A backend test suite, in Jest, with no RTL** — `apps/api` and
-   `packages/shared`.
-2. **A frontend integration test, with RTL** — `TaskListScreen` rendered
-   against a mock server.
-
-Both are described below. If the intent was instead "backend tests, and
-separately some RTL", that is what is here.
-
-### 1. Backend and shared — Jest, no RTL
+### 1. Backend and shared — Jest
 
 `packages/shared` (70 tests) and `apps/api` (273), plus the non-rendering parts
 of `apps/web`. Two kinds, and the split is worth stating rather than filing
@@ -339,7 +319,7 @@ field whitelist are all asserted there.
 
 Calling a handler directly instead would skip the parts most likely to be wrong.
 The cost of the choice is that the backend's domain rules have no unit test of
-their own, and that is the honest reading of the paragraph above.
+their own.
 
 **What is not covered**: `mark_task_done()` is never executed by an automated
 test. `db/mark-task-done.test.ts` reads the migration as text and checks it
@@ -395,14 +375,6 @@ not taken. Mitigated by refresh token rotation and by the SPA talking to no
 other origin; not eliminated. For anything beyond a local demo this is the first
 thing to change.
 
-**The database connection is encrypted but, by default, not authenticated.**
-Supabase's pooler presents a self-signed chain, so Node rejects it unless told
-which root to trust. With `DATABASE_CA_CERT` unset the client falls back to
-`rejectUnauthorized: false`. Set it — dashboard → Settings → Database → SSL
-configuration — and verification is on. The two branches are spelled out in
-`db/client.ts` rather than left to a bare flag, so the weaker one is a visible
-choice rather than a default nobody revisits.
-
 **The deployment target is local.** There is no hosted instance; whoever reviews
 this runs it. That is the decision the Vercel and Edge Function options were
 measured against, and it is why the env files are written by a wizard rather
@@ -428,4 +400,81 @@ docs/openapi.json  Generated — `npm run docs:api`
 scripts/         setup-auth0.sh
 ```
 
-`PLAN.md` §3 has the file-level structure inside each workspace.
+npm workspaces. Both apps depend on `@insightt/shared`; neither depends on the
+other. The root `package.json` is workspace declarations and orchestration
+scripts only — it is not itself an app.
+
+Inside each workspace:
+
+```
+apps/api/src/     index.ts  app.ts  env.ts
+                  db/{client,schema,migrate,seed}.ts
+                  docs/    openapi     (the document, built from the schemas)
+                           router      (serves it, and Swagger UI, in dev)
+                           generate    (writes docs/openapi.json)
+                  middleware/{auth,logging,validate,errors}.ts
+                  tasks/   routes  mappers
+                           repository            (the interface)
+                           repository.drizzle    (Postgres)
+                           repository.fake       (the test fake)
+                  testing/harness.ts
+                  types/express.d.ts
+
+apps/web/src/     app/{layout,page}.tsx
+                  config.ts
+                  providers/{Auth0,Query,Antd}.tsx
+                  components/auth/    RequireAuth  LandingPanel
+                                      LoginButton  SignUpButton
+                                      LogoutButton
+                  components/tasks/   TaskListScreen  TaskTable
+                                      TaskFormModal   TaskStatusTag
+                                      TaskActions     TaskFilters
+                  components/shared/  AppHeader  FullPageSpin
+                                      ErrorState  EmptyState
+                  api/{client,tasks}.ts
+                  forms/zodFieldErrors.ts
+                  hooks/{useTasks,useTaskMutations}.ts
+                  stores/{session,taskList}.ts
+                  testing/harness.tsx
+
+packages/shared/  src/index.ts
+                  src/schemas/{task,errors}.ts
+                  src/rules/transitions.ts
+
+cypress/          e2e/task-list.cy.ts
+                  support/{e2e,commands,auth0}.ts
+```
+
+Components are grouped by the screen they belong to, with `shared/` for the
+pieces both screens reach for. `hooks/`, `stores/`, `api/` and `forms/` stay
+flat; there are five files between them and nesting would be ceremony.
+
+Four of those files are seams rather than folders, and they are why the tests
+above can be written at all:
+
+**`app.ts` is separate from `index.ts` on purpose.** `createApp(deps)` takes the
+Task repository and the auth middleware as arguments; `index.ts` is the only
+file that reads the environment, builds the real ones and listens. A test gets
+the real middleware stack — real CORS, real logging, real error mapper — with no
+tenant, no network and no database behind it.
+
+**`tasks/repository.ts` holds only the interface**, with the two
+implementations beside it under suffixed names. Nothing above the interface
+imports either, so nothing above it knows Drizzle exists.
+
+**`TaskListScreen` is a component rather than a function inside `page.tsx`**,
+for the same reason. `page.tsx` is the route and the auth gate; the screen
+behind it renders without Auth0, which under jsdom is the difference between
+testing the task list and testing Universal Login. The two
+`testing/harness` files build each side with its real providers and a fake at
+the edge.
+
+**`apps/web/src/config.ts` is the frontend's environment boundary** — the one
+place `process.env.NEXT_PUBLIC_*` is read, validated loudly so a missing value
+fails the build instead of becoming a redirect to `https://undefined/authorize`.
+
+`tasks/mappers.ts` is kept even though it looks like ceremony: it is the file
+that makes the Drizzle-row-versus-wire-contract separation visible in ten
+seconds rather than taken on faith. `forms/zodFieldErrors.ts` is the adapter
+between a Zod parse and Ant Design's `Form`, and it is a folder of its own
+rather than a `components/` neighbour because it renders nothing.
