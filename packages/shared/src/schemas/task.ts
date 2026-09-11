@@ -174,7 +174,7 @@ export type TaskPage = z.infer<typeof TaskPageSchema>;
 export const TASK_PAGE = {
   /** Where an unpaged list starts, and where a changed filter goes back to. */
   first: 1,
-  defaultSize: 10,
+  defaultSize: 5,
   /** No request may ask for the whole table in a single round trip. */
   maxSize: 100,
 } as const;

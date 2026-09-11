@@ -18,7 +18,7 @@ const { Paragraph, Text } = Typography;
  * `TASK_PAGE` rather than being typed here, so no option can ask for a page the
  * API answers with `422`. The steps between them are only steps.
  */
-const PAGE_SIZES = [TASK_PAGE.defaultSize, 20, 50, TASK_PAGE.maxSize];
+const PAGE_SIZES = [TASK_PAGE.defaultSize, 10, 50, TASK_PAGE.maxSize];
 
 /**
  * The columns, built around the one callback a row needs. A function rather

@@ -4,6 +4,7 @@ import {
   EDITABLE_FIELDS,
   LIFECYCLE,
   statusBefore,
+  TASK_PAGE,
   TaskPageSchema,
   TaskSchema,
   type TaskStatus,
@@ -39,8 +40,8 @@ describe("GET /api/tasks", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       items: [],
-      page: 1,
-      pageSize: 10,
+      page: TASK_PAGE.first,
+      pageSize: TASK_PAGE.defaultSize,
       total: 0,
     });
   });
@@ -116,12 +117,18 @@ describe("GET /api/tasks", () => {
   });
 
   describe("the query string", () => {
-    it("defaults to the first page of ten", async () => {
+    // Named from `TASK_PAGE` rather than repeating the numbers: the defaults
+    // are the contract's to choose, and a test that restated them would fail
+    // for a changed default rather than for a route that stopped applying one.
+    it("defaults to the first page, at the contract's page size", async () => {
       const { app } = harness();
 
       const response = await request(app).get("/api/tasks");
 
-      expect(response.body).toMatchObject({ page: 1, pageSize: 10 });
+      expect(response.body).toMatchObject({
+        page: TASK_PAGE.first,
+        pageSize: TASK_PAGE.defaultSize,
+      });
     });
 
     it("pages, reporting the total across every page", async () => {
