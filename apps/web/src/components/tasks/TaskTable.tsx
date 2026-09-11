@@ -2,6 +2,7 @@
 
 import type { Task } from "@insightt/shared";
 import { Table, Tag, Typography, type TableProps } from "antd";
+import type { ReactNode } from "react";
 
 import { EmptyState } from "@/components/shared/EmptyState";
 
@@ -35,6 +36,11 @@ const columns: NonNullable<TableProps<Task>["columns"]> = [
 interface TaskTableProps {
   tasks: Task[];
   loading: boolean;
+  /**
+   * What an empty list offers to do next. The screen supplies it, so the table
+   * renders Tasks and does not also have to know how one is created.
+   */
+  emptyAction?: ReactNode;
 }
 
 /**
@@ -42,7 +48,7 @@ interface TaskTableProps {
  * column sorts client-side — a sortable column would reorder one page and
  * silently lie about the rest.
  */
-export function TaskTable({ tasks, loading }: TaskTableProps) {
+export function TaskTable({ tasks, loading, emptyAction }: TaskTableProps) {
   return (
     <Table<Task>
       rowKey="id"
@@ -51,7 +57,9 @@ export function TaskTable({ tasks, loading }: TaskTableProps) {
       loading={loading}
       pagination={false}
       locale={{
-        emptyText: <EmptyState description="No tasks yet." />,
+        emptyText: (
+          <EmptyState description="No tasks yet." action={emptyAction} />
+        ),
       }}
     />
   );

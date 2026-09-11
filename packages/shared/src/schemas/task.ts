@@ -35,6 +35,60 @@ export const TaskSchema = z.object({
 export type Task = z.infer<typeof TaskSchema>;
 
 /**
+ * A Task's title, as a client may submit it. Trimmed first, so the length
+ * rules measure what will actually be stored: `"   "` is the empty title in
+ * disguise, and a `min(1)` on the untrimmed string would wave it through.
+ *
+ * The messages are written for a person, because these are the strings the
+ * create form shows under the field (`zodFieldErrors` in `apps/web`).
+ */
+const title = z
+  .string()
+  .trim()
+  .min(1, "Title is required")
+  .max(200, "Title must be 200 characters or fewer");
+
+/**
+ * A Task's description, as a client may submit it.
+ *
+ * A blank description becomes `null` rather than `""`. An empty text area is
+ * someone leaving the field alone, not someone asking for a description that is
+ * the empty string, and storing both spellings would make "has a description"
+ * two questions instead of one.
+ *
+ * `null` is accepted explicitly as well as by omission, because an edit needs a
+ * way to say "clear this" that omitting the key cannot mean.
+ */
+const description = z
+  .string()
+  .trim()
+  .max(2000, "Description must be 2000 characters or fewer")
+  .transform((value) => (value === "" ? null : value))
+  .nullable();
+
+/**
+ * The body of `POST /api/tasks`.
+ *
+ * **`status` is absent, deliberately.** A Task is always created `PENDING` and
+ * only ever moves through the dedicated transition endpoints, which is what
+ * keeps `mark_task_done()` the single entrance to `DONE` that PLAN.md §8's
+ * idempotency guarantee depends on. Adding `status` here would break it.
+ *
+ * `strictObject` is what makes that stick: a stray `status`, or a typo in a
+ * field name, is a `422 VALIDATION_FAILED` rather than a key silently dropped
+ * on the floor. A create that quietly ignored a Status would read, from the
+ * outside, exactly like one that had honoured it.
+ */
+export const CreateTaskInput = z.strictObject({
+  title,
+  description: description.optional(),
+});
+/** What a handler receives: trimmed, with a blank description already `null`. */
+export type CreateTaskInput = z.infer<typeof CreateTaskInput>;
+/** What a client may send: the form's shape, before any of that has happened. */
+export type CreateTaskDraft = z.input<typeof CreateTaskInput>;
+
+/**
  * The list envelope: `{ items, page, pageSize, total }`. Offset pagination,
  * because Ant Design's `Table` needs a total count to render its pager.
  */

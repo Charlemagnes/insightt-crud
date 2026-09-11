@@ -1,7 +1,10 @@
 import type { Task } from "@insightt/shared";
 
+import { randomUUID } from "node:crypto";
+
 import type {
   OwnerScopedListQuery,
+  OwnerScopedTaskDraft,
   OwnerScopedTaskQuery,
   TaskListResult,
   TaskRepository,
@@ -77,6 +80,32 @@ export function createMemoryTaskRepository(
         (task) => task.id === id && task.ownerId === userId,
       );
       return found ? withoutOwner(found) : null;
+    },
+
+    async create({
+      userId,
+      title,
+      description,
+    }: OwnerScopedTaskDraft): Promise<Task> {
+      const now = new Date().toISOString();
+
+      const created: OwnedTask = {
+        id: randomUUID(),
+        ownerId: userId,
+        title,
+        description,
+        // The column default, spelled out. A fake that started a Task anywhere
+        // else would let a route that honoured a caller's Status pass here.
+        status: "PENDING",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        completedAt: null,
+      };
+
+      tasks.push(created);
+
+      return withoutOwner(created);
     },
   };
 }

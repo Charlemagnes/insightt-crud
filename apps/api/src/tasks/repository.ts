@@ -23,6 +23,23 @@ export interface OwnerScopedTaskQuery {
   id: string;
 }
 
+/**
+ * A Task to create, and the Owner it will belong to.
+ *
+ * There is no `status` and no `version`: both are the database's to decide, and
+ * a caller that could name either would be able to create a Task that had
+ * already skipped part of its lifecycle.
+ *
+ * `description` is `string | null` rather than optional, so "no description" is
+ * spelled one way by the time it reaches storage. The shared schema has already
+ * turned a blank one into `null`.
+ */
+export interface OwnerScopedTaskDraft {
+  userId: string;
+  title: string;
+  description: string | null;
+}
+
 /** One page of Tasks, plus the count the pager needs to size itself. */
 export interface TaskListResult {
   items: Task[];
@@ -53,4 +70,13 @@ export interface TaskRepository {
    * exists.
    */
   findById(query: OwnerScopedTaskQuery): Promise<Task | null>;
+
+  /**
+   * Stores a new Task under the Actor and returns it as the wire sees it.
+   *
+   * The new Task is `PENDING`, always. The draft has no way to say otherwise,
+   * and the column defaults to it, so neither a caller nor a careless insert
+   * can produce a Task that starts anywhere else.
+   */
+  create(draft: OwnerScopedTaskDraft): Promise<Task>;
 }

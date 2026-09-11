@@ -6,6 +6,7 @@ import { tasks } from "@/db/schema";
 import { toTask } from "@/tasks/mappers";
 import type {
   OwnerScopedListQuery,
+  OwnerScopedTaskDraft,
   OwnerScopedTaskQuery,
   TaskListResult,
   TaskRepository,
@@ -64,6 +65,30 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
         .limit(1);
 
       return row ? toTask(row) : null;
+    },
+
+    async create({
+      userId,
+      title,
+      description,
+    }: OwnerScopedTaskDraft): Promise<Task> {
+      // `status` and `version` are left to the column defaults rather than
+      // written here. Naming them would be a second place the starting Status
+      // is decided, and the one in the database is the one that holds even when
+      // the write does not come from this process.
+      const [row] = await db
+        .insert(tasks)
+        .values({ ownerId: userId, title, description })
+        .returning();
+
+      // `insert ... returning` on a single row either returns it or throws;
+      // there is no third outcome. Asserting it here keeps the impossible case
+      // from becoming a `Task | undefined` every caller has to answer for.
+      if (!row) {
+        throw new Error("Insert returned no row");
+      }
+
+      return toTask(row);
     },
   };
 }

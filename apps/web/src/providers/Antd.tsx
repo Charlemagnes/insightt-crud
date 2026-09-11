@@ -1,7 +1,7 @@
 "use client";
 
 import { AntdRegistry } from "@ant-design/nextjs-registry";
-import { ConfigProvider } from "antd";
+import { App, ConfigProvider } from "antd";
 import type { ReactNode } from "react";
 
 /**
@@ -22,7 +22,11 @@ export function AntdProvider({ children }: { children: ReactNode }) {
   return (
     <AntdRegistry>
       <ConfigProvider theme={{ token: { fontFamily: FONT_FAMILY } }}>
-        {children}
+        {/* `App` is what makes `message` and `notification` reachable as hooks.
+            antd's static `message.success(...)` renders outside this provider
+            and so outside the theme above — it would ignore the font, and warn
+            in development that it is doing so. */}
+        <App>{children}</App>
       </ConfigProvider>
     </AntdRegistry>
   );
