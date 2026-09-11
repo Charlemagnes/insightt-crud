@@ -74,14 +74,16 @@ apps/web/src/     app/{layout,page}.tsx
                   providers/{Auth0,Query,Antd}.tsx
                   components/auth/    RequireAuth  LandingPanel
                                       LoginButton  LogoutButton
-                  components/tasks/   TaskTable  TaskFormModal
-                                      TaskStatusTag  TaskActions  TaskFilters
+                  components/tasks/   TaskListScreen  TaskTable
+                                      TaskFormModal   TaskStatusTag
+                                      TaskActions     TaskFilters
                   components/shared/  AppHeader  FullPageSpin
                                       ErrorState  EmptyState
                   api/{client,tasks}.ts
                   forms/zodFieldErrors.ts
                   hooks/{useTasks,useTaskMutations}.ts
                   stores/{session,taskList}.ts
+                  testing/harness.tsx
 
 packages/shared/  src/index.ts
                   src/schemas/task.ts
@@ -96,6 +98,15 @@ flat; there are five files between them and nesting would be ceremony.
 Design's `Form`, and it is a folder of its own rather than a `components/`
 neighbour because it renders nothing — the alternative is a per-field
 `validator`, which is the shared rules written a second time for the browser.
+
+`TaskListScreen` is a component rather than a function inside `page.tsx` for
+the same reason `app.ts` is separate from `index.ts` on the backend: it is the
+seam the §15 integration test hangs off. `page.tsx` is the route and the auth
+gate; the screen behind it renders without Auth0, which under jsdom is the
+difference between testing the task list and testing Universal Login.
+`apps/web/src/testing/harness.tsx` is the frontend twin of
+`apps/api/src/testing/harness.ts` — it builds that screen with the real
+providers, the real stores and an in-memory API behind MSW.
 
 `tasks/mappers.ts` is kept even though it looks like ceremony — it is the file
 that makes §11's Drizzle-row-vs-wire-contract separation visible in ten seconds
@@ -761,9 +772,17 @@ that changing a filter resets the page. They live beside the code they test —
 project.
 
 **2. Integration — Jest + React Testing Library + MSW** (`apps/web`)
-The task list component. MSW mocks `GET /api/tasks` and
-`POST /api/tasks/:id/done`; asserts the row re-renders as Done, and that a
-replayed `200` is handled as success rather than surfaced as an error.
+`TaskListScreen` with the real providers behind it — the real Query cache, the
+real Zustand stores, the real components — and MSW the only thing standing in.
+It asserts the rows the API returned, that marking an `IN_PROGRESS` Task Done
+re-renders it as Done, that a replayed `200` is handled as success rather than
+surfaced as an error, and that a control the row's Status makes illegal is
+disabled.
+
+Auth0 is the one thing besides the network that the screen cannot reach under
+jsdom, and it is not mocked either: the test renders the screen rather than the
+page, and seeds the session store with the same write `SessionMirror` makes.
+Signing in for real is test 3's job.
 
 **3. E2E — Cypress**
 The login flow, using the Regular Web Application from §10 with
@@ -775,17 +794,29 @@ boots already authenticated with no cross-origin redirect. The spec stays
 **read-only** — log in, assert the list renders — so there is no teardown.
 `cy.origin()` is the fallback if the Password grant cannot be enabled.
 
-Config: `next/jest` in `apps/web` (jsdom, with `jest.setup.ts` supplying the
-`NEXT_PUBLIC_*` values `config.ts` reads at import time, so the suite needs no
-real tenant), `ts-jest` (CJS preset) in `apps/api`, and
+Config: `next/jest` in `apps/web` (`jest-fixed-jsdom`, with `jest.setup.ts`
+supplying the `NEXT_PUBLIC_*` values `config.ts` reads at import time, so the
+suite needs no real tenant), `ts-jest` (CJS preset) in `apps/api`, and
 `ts-jest` in `packages/shared` with `module: commonjs` overridden for the test
 run only — the package's own `tsconfig.json` targets the bundlers that consume
 it, which means ESM, and ts-jest on ESM is the tarpit §2 avoids in `apps/api`.
 
-**Known landmine, budget an hour:** MSW v2 is ESM-first and needs polyfills
-under Jest + jsdom (`TextEncoder`, `TransformStream`, `BroadcastChannel`,
-`fetch`). `next/jest` covers some; `jest-fixed-jsdom` as the test environment
-covers the rest.
+**Known landmine, budget an hour** — and it cost roughly that. Two halves:
+
+- MSW needs browser globals jsdom does not ship (`fetch`, `TextEncoder`,
+  `TransformStream`, `BroadcastChannel`). `jest-fixed-jsdom` as the test
+  environment supplies all four from Node's own implementations, which is fewer
+  moving parts than hand-written polyfills and closer to a real browser.
+- Several of MSW's dependencies publish ESM and nothing else. Jest loads
+  `node_modules` as CommonJS without transforming it, so an `.mjs` with no CJS
+  twin arrives as a syntax error naming the *test* file — `jest.config.js` names
+  those packages as exceptions to `transformIgnorePatterns`. `require(esm)`
+  lands in Node 24.9 and makes the list unnecessary; the engine floor is lower.
+
+Two smaller ones, both in `jest.setup.dom.ts`: antd calls `matchMedia`, which
+jsdom leaves undefined, and `getComputedStyle` with a pseudo-element, which
+jsdom throws "not implemented" for — only logged, so it buries a real error
+under a hundred lines of stack rather than failing.
 
 ---
 
