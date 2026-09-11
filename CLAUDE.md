@@ -45,6 +45,7 @@ apps/api/drizzle SQL migrations — generated, plus hand-written `--custom` ones
 packages/shared  @insightt/shared — Zod schemas + the status transition rules
 cypress/         The one E2E spec, and the Auth0 sign-in that seeds it
 docs/adr/        Architecture decision records
+docs/openapi.json  Generated — never hand-edit; run `npm run docs:api`
 scripts/         setup-auth0.sh
 ```
 
@@ -99,6 +100,13 @@ v16 APIs differ from older releases.
 - **Nothing above `tasks/repository.ts` knows Drizzle exists.** The interface is
   in that file; `repository.drizzle.ts` and `repository.fake.ts` implement it,
   and only `index.ts` and the test harness name one.
+- **The API description is generated, not written.** `apps/api/src/docs/openapi.ts`
+  builds it from the shared Zod schemas with `z.toJSONSchema()`, so no field,
+  cap or enum member is ever restated. Only what Zod cannot know — the routes,
+  their headers, the error codes each answers with — is written by hand there,
+  and `openapi.test.ts` holds that half against the real Express router. It is
+  served at `/api/docs` outside production only; it cannot sit behind the auth
+  stack, which is the whole reason it is not always on.
 - **Triggers and functions are hand-written migrations.** `drizzle-kit` diffs
   tables only, so `npm run db:generate -- --custom --name <what>` and write the
   SQL. Never edit a generated migration to carry one.

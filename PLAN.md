@@ -49,7 +49,9 @@ apps/api              Express + TypeScript REST API
 packages/shared       Zod schemas, inferred types, status-transition rules
 cypress/              The E2E spec and the Auth0 sign-in it needs
 docs/adr/             Architecture decision records
+docs/openapi.json     Generated from the Zod schemas — `npm run docs:api`
 scripts/              setup-auth0.sh
+README.md             Setup, the two evaluations, and the trades taken knowingly
 CONTEXT.md            Domain glossary
 ```
 
@@ -62,6 +64,9 @@ scripts only — it is not itself an app.
 ```
 apps/api/src/     index.ts  app.ts  env.ts
                   db/{client,schema,migrate,seed}.ts
+                  docs/    openapi     (the document, built from the schemas)
+                           router      (serves it, and Swagger UI, in dev)
+                           generate    (writes docs/openapi.json)
                   middleware/{auth,logging,validate,errors}.ts
                   tasks/   routes  mappers
                            repository            (the interface)
@@ -87,7 +92,7 @@ apps/web/src/     app/{layout,page}.tsx
                   testing/harness.tsx
 
 packages/shared/  src/index.ts
-                  src/schemas/task.ts
+                  src/schemas/{task,errors}.ts
                   src/rules/transitions.ts
 
 cypress/          e2e/task-list.cy.ts
@@ -764,13 +769,22 @@ non-rendering parts of `apps/web`)
 Two kinds of test, and the split is worth stating plainly rather than filing
 both under "unit".
 
-*Genuinely unit*: the transition validator and the schemas in
-`packages/shared`; `tasks/mappers.ts`, `env.ts` and the log formatter in
-`apps/api`. Pure functions, called directly. Plus a drift test asserting the
-shared machine permits exactly the transition `mark_task_done`'s SQL hardcodes
-— the rule is deliberately written in two languages (TypeScript for the
-pre-check and the UI, SQL for atomic enforcement), so a test has to hold them
-together.
+*Genuinely unit* — 88 of `apps/api`'s 272, called directly with no HTTP in
+front of them, alongside all 70 in `packages/shared`: the transition validator
+and the schemas there; and in `apps/api`, `repository.drizzle.ts` under a
+stubbed `pg` pool, which at 51 cases asserting the SQL and the parameters it
+emits is the largest single block of tests in the repo, plus `tasks/mappers.ts`,
+`env.ts` and `docs/openapi.ts`.
+
+Three drift checks sit in the same tier, each holding apart two spellings of one
+rule that cannot be derived from each other: the Zod enum against the Postgres
+one; the shared machine against the transition `mark_task_done`'s SQL hardcodes;
+and the routes the generated document describes against the ones the Express
+router actually serves. The second of those is deliberately written in two
+languages — TypeScript for the pre-check and the UI, SQL for atomic enforcement
+— so a test has to hold them together. The third is what stops a route being
+added without a line of documentation, which is the one kind of drift
+generating the document from the schemas cannot prevent on its own.
 
 `apps/web` contributes to this tier as well as being the next one: the list's
 view state and the query string it becomes are plain modules, and testing them
@@ -788,7 +802,13 @@ live in `tasks/routes.ts`, and `testing/harness.ts` enters them through the real
 behind the real interface) and the auth middleware is stubbed; everything
 between is real — CORS, the body parser, validation, the error mapper. Each
 legal Transition, each rejected one, the already-DONE Replay, the non-owner
-`404` and the per-Status field whitelist are all asserted there.
+`404` and the per-Status field whitelist are all asserted there — 163 of the
+184 in this tier. The request logger belongs to it too:
+`middleware/logging.test.ts` drives the logger through a real Express app,
+because the `params` and `body` it records do not exist until a request has been
+routed. So does `app.test.ts`, which covers what sits around the routes rather
+than in them: the auth boundary, CORS, the body parser, and the `/api/docs`
+mount that is present outside production and absent inside it.
 
 Calling a handler directly instead would skip the parts most likely to be
 wrong, which is the same argument §3 makes for `createApp(deps)` existing at
@@ -900,13 +920,15 @@ Environment:
 
 | File | Variables |
 |---|---|
-| `apps/api/.env` | `DATABASE_URL` (Supavisor session-mode string), `DATABASE_CA_CERT` (optional), `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `PORT`, `WEB_ORIGIN` |
+| `apps/api/.env` | `DATABASE_URL` (Supavisor session-mode string), `DATABASE_CA_CERT` (optional), `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `PORT`, `WEB_ORIGIN`, `NODE_ENV` (optional; anything but `production` mounts `/api/docs`) |
 | `apps/web/.env.local` | `NEXT_PUBLIC_AUTH0_DOMAIN`, `NEXT_PUBLIC_AUTH0_CLIENT_ID`, `NEXT_PUBLIC_AUTH0_AUDIENCE`, `NEXT_PUBLIC_API_URL` |
 | `cypress.env.json` | `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_REALM`, `AUTH0_SPA_CLIENT_ID`, `AUTH0_CYPRESS_CLIENT_ID`, `AUTH0_CYPRESS_CLIENT_SECRET`, `AUTH0_TEST_EMAIL`, `AUTH0_TEST_PASSWORD` |
 
-All three are gitignored. `.env.example` files ship with the repo and the README
-documents the setup path; the deployment target is local, so whoever reviews
-this runs it themselves.
+A fourth, `.env` at the root, is the wizard's own record of what was answered so
+a re-run can offer the previous values as defaults; nothing reads it at runtime.
+All four are gitignored. `.env.example` files ship with the repo for the two the
+apps read, and the README documents the setup path; the deployment target is
+local, so whoever reviews this runs it themselves.
 
 **Documentation deliverables:**
 
@@ -918,7 +940,16 @@ this runs it themselves.
   middlewares. Not on every React component, where it reads as padding.
 - **Inline comments** explain *why* only.
 - **`docs/openapi.json`**, generated from the same Zod schemas that validate
-  requests, so it cannot drift. Swagger UI at `/api/docs` in dev only.
+  requests, so it cannot drift. `docs/openapi.ts` builds the document with
+  `z.toJSONSchema()`; `npm run docs:api` writes the file, and the running API
+  serves the same document at `/api/docs/openapi.json` with Swagger UI over it
+  at `/api/docs` — **dev only**, because it has to sit outside the auth stack
+  (a browser loading a page carries no Authorization header), and `NODE_ENV`
+  is what turns it off.
+
+  Generating it settles the schemas but not the routes, so `docs/openapi.test.ts`
+  reads the operations off the real Express router and asserts the document
+  describes exactly those. Adding a route without documenting it fails a test.
 
 ---
 
@@ -983,3 +1014,7 @@ this order and stop when back on schedule:
 **Tests are never cut.** Item 11 is the most mechanically checkable requirement
 in the brief; a reviewer diffing against it notices a missing Cypress spec faster
 than a missing filter.
+
+In the event nothing was cut: server-side pagination, the status filter and the
+generated description all shipped. The list stands as a record of what the
+budget was prepared to lose, not of what it lost.

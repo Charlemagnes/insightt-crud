@@ -52,6 +52,13 @@ describe("loadEnv", () => {
     );
   });
 
+  it("serves the generated API description everywhere but production", () => {
+    expect(loadEnv(COMPLETE).serveDocs).toBe(true);
+    expect(loadEnv({ ...COMPLETE, NODE_ENV: "production" }).serveDocs).toBe(
+      false,
+    );
+  });
+
   it("builds the issuer base URL the tenant JWKS is fetched from", () => {
     expect(loadEnv(COMPLETE).auth0IssuerBaseUrl).toBe(
       "https://example.eu.auth0.com/",

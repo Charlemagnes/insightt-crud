@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "docs:api": "tsx src/docs/generate.ts"
   },
   "dependencies": {
     "@insightt/shared": "*",
@@ -18,6 +19,7 @@
     "express": "^5.2.1",
     "express-oauth2-jwt-bearer": "^1.10.0",
     "pg": "^8.23.0",
+    "swagger-ui-express": "^5.0.1",
     "zod": "^4.6.2"
   },
   "devDependencies": {
@@ -27,6 +29,7 @@
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.2.1",
+    "@types/swagger-ui-express": "^4.1.8",
     "drizzle-kit": "^0.31.10",
     "jest": "^30",
     "supertest": "^7.2.2",
