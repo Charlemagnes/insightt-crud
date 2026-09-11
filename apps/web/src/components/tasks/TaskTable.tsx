@@ -9,7 +9,7 @@ import { TaskActions } from "@/components/tasks/TaskActions";
 import { TaskStatusTag } from "@/components/tasks/TaskStatusTag";
 import { useTaskListStore } from "@/stores/taskList";
 
-const { Text } = Typography;
+const { Paragraph, Text } = Typography;
 
 /**
  * The sizes the pager offers. The two that carry a rule — the default the API
@@ -32,7 +32,23 @@ const columnsFor = (
     title: "Title",
     dataIndex: "title",
     key: "title",
-    render: (title: string) => <Text strong>{title}</Text>,
+    // Declared rather than left to take whatever the other columns do not
+    // want: a title is the thing a row is scanned by, and the leftover was
+    // narrow enough to wrap most of them onto a second line.
+    width: 180,
+    // A long title is cut with an ellipsis instead of wrapping, so every row
+    // is one line tall and the column cannot stretch the table. `ellipsis` on
+    // any column also switches the table to a fixed layout, which is what
+    // makes the widths above hold.
+    ellipsis: true,
+    // The full title on hover, because the cell only ever shows the start of
+    // a long one — and the description behind the row's expander is the other
+    // half of the same answer.
+    render: (title: string) => (
+      <Text strong title={title}>
+        {title}
+      </Text>
+    ),
   },
   {
     title: "Status",
@@ -117,6 +133,27 @@ export function TaskTable({
       // them, which is what turns `keepPreviousData` into a visible "loading
       // the next page" instead of a table that empties and reflows.
       loading={loading}
+      // The description, one row at a time. It is the only field of a Task the
+      // list does not otherwise show, and it is the long one — a column of it
+      // would either be cut to uselessness or make every row as tall as the
+      // wordiest. Behind an expander it costs nothing until someone asks.
+      //
+      // `rowExpandable` keeps the control off a Task that has no description:
+      // an expander that opens onto nothing is a promise the row cannot keep.
+      // Ant Design still reserves the cell, so the rows stay aligned.
+      expandable={{
+        columnWidth: 48,
+        rowExpandable: (task) => task.description !== null,
+        expandedRowRender: (task) => (
+          <Paragraph
+            // The text is whatever someone typed, newlines included, and the
+            // form stored it verbatim. `pre-wrap` shows it back the same way.
+            style={{ whiteSpace: "pre-wrap", margin: 0 }}
+          >
+            {task.description}
+          </Paragraph>
+        ),
+      }}
       pagination={{
         current: page,
         pageSize,
