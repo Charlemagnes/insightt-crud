@@ -1,4 +1,4 @@
-import { CreateTaskInput, TaskSchema } from "./task";
+import { CreateTaskInput, TASK_LIMITS, TaskSchema } from "./task";
 
 const valid = { title: "Write the plan" };
 
@@ -75,6 +75,46 @@ describe("CreateTaskInput", () => {
         CreateTaskInput.safeParse({ ...valid, description: "a".repeat(2001) })
           .success,
       ).toBe(false);
+    });
+  });
+
+  describe("TASK_LIMITS", () => {
+    // The create form counts characters against these as the person types, and
+    // shows the limit beside the field. They are the published spelling of a
+    // rule only the schema enforces, so a limit that said one number while the
+    // schema rejected at another would count someone down to a cap that was
+    // not there. The literals below are deliberate: reusing TASK_LIMITS to
+    // build the input would make the test agree with itself.
+    it("says where the title rule actually rejects", () => {
+      expect(TASK_LIMITS.title).toBe(200);
+      expect(
+        CreateTaskInput.safeParse({ title: "a".repeat(200) }).success,
+      ).toBe(true);
+      expect(
+        CreateTaskInput.safeParse({ title: "a".repeat(201) }).success,
+      ).toBe(false);
+    });
+
+    it("says where the description rule actually rejects", () => {
+      expect(TASK_LIMITS.description).toBe(2000);
+      expect(
+        CreateTaskInput.safeParse({ ...valid, description: "a".repeat(2000) })
+          .success,
+      ).toBe(true);
+      expect(
+        CreateTaskInput.safeParse({ ...valid, description: "a".repeat(2001) })
+          .success,
+      ).toBe(false);
+    });
+
+    it("names the limit in the message the field shows", () => {
+      const result = CreateTaskInput.safeParse({ title: "a".repeat(201) });
+
+      // The person reads this under the input, beside a counter reading
+      // 201 / 200. The two have to be talking about the same number.
+      expect(result.error?.issues[0]?.message).toContain(
+        String(TASK_LIMITS.title),
+      );
     });
   });
 

@@ -1,6 +1,10 @@
 "use client";
 
-import { CreateTaskInput, type CreateTaskDraft } from "@insightt/shared";
+import {
+  CreateTaskInput,
+  TASK_LIMITS,
+  type CreateTaskDraft,
+} from "@insightt/shared";
 import { App, Form, Input, Modal } from "antd";
 
 import { ApiError } from "@/api/client";
@@ -130,11 +134,15 @@ export function TaskFormModal({ open, onClose }: TaskFormModalProps) {
         onFinish={() => void submit()}
       >
         <Form.Item label="Title" name="title" required>
-          {/* No `maxLength`: the input would truncate a pasted title silently,
-              and the rule that bounds it would never get to say so. */}
+          {/* `count` rather than `maxLength`: it shows the limit and marks the
+              overflow, where `maxLength` would quietly drop the tail of a
+              pasted title and leave the rule that bounds it nothing to say.
+              Without an `exceedFormatter` it counts past the max instead of
+              truncating, so the schema stays the only thing that rejects. */}
           <Input
             autoFocus
             placeholder="What needs doing?"
+            count={{ show: true, max: TASK_LIMITS.title }}
             disabled={create.isPending}
           />
         </Form.Item>
@@ -142,6 +150,7 @@ export function TaskFormModal({ open, onClose }: TaskFormModalProps) {
           <Input.TextArea
             rows={4}
             placeholder="Optional detail"
+            count={{ show: true, max: TASK_LIMITS.description }}
             disabled={create.isPending}
           />
         </Form.Item>

@@ -35,6 +35,19 @@ export const TaskSchema = z.object({
 export type Task = z.infer<typeof TaskSchema>;
 
 /**
+ * How long each text field may be.
+ *
+ * Exported because the create form counts characters against these as the
+ * person types, and a form that carried its own copy would drift from the rule
+ * that actually rejects the value. The schema below is the only enforcement;
+ * this is what lets the UI say the same number without restating it.
+ */
+export const TASK_LIMITS = {
+  title: 200,
+  description: 2000,
+} as const;
+
+/**
  * A Task's title, as a client may submit it. Trimmed first, so the length
  * rules measure what will actually be stored: `"   "` is the empty title in
  * disguise, and a `min(1)` on the untrimmed string would wave it through.
@@ -46,7 +59,10 @@ const title = z
   .string()
   .trim()
   .min(1, "Title is required")
-  .max(200, "Title must be 200 characters or fewer");
+  .max(
+    TASK_LIMITS.title,
+    `Title must be ${TASK_LIMITS.title} characters or fewer`,
+  );
 
 /**
  * A Task's description, as a client may submit it.
@@ -62,7 +78,10 @@ const title = z
 const description = z
   .string()
   .trim()
-  .max(2000, "Description must be 2000 characters or fewer")
+  .max(
+    TASK_LIMITS.description,
+    `Description must be ${TASK_LIMITS.description} characters or fewer`,
+  )
   .transform((value) => (value === "" ? null : value))
   .nullable();
 
