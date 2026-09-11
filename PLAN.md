@@ -670,8 +670,9 @@ Consumption:
 **Two type layers, kept separate.** Drizzle also infers types from the table.
 These are not the same thing and must not be collapsed:
 
-- **Drizzle types** describe the DB row — snake_case columns, DB nullability.
-  Internal to `apps/api`.
+- **Drizzle types** describe the DB row — `Date` columns, an `ownerId`, DB
+  nullability. Internal to `apps/api`. (The snake_case is in the SQL column
+  names only; the inferred TypeScript is camelCase.)
 - **Zod types** describe the API contract. Shared with the frontend.
 - `apps/api/src/tasks/mappers.ts` maps between them.
 

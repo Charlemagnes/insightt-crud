@@ -5,9 +5,9 @@ import type { TaskRow } from "@/db/schema";
 /**
  * The seam between the two type layers (PLAN.md §11).
  *
- * Drizzle types describe a database row: snake_case columns, `Date` objects,
- * `owner_id`. Zod types describe the wire contract: camelCase, ISO strings, and
- * no Owner at all. They are near-identical today and will not stay that way —
+ * Drizzle types describe a database row: `Date` objects and an `ownerId`. Zod
+ * types describe the wire contract: ISO strings, and no Owner at all. They are
+ * near-identical today and will not stay that way —
  * the row is free to grow a column the API does not publish, and the contract
  * is free to rename a field without a migration.
  *

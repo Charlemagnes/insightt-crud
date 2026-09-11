@@ -105,8 +105,9 @@ v16 APIs differ from older releases.
   the dedicated endpoints (`/start`, `/done`, `/archive`) only, so that
   `mark_task_done()` stays the single atomic entrance to `DONE`. Adding `status` to
   `CreateTaskInput` or `UpdateTaskInput` breaks the idempotency guarantee.
-- **Two type layers, never collapsed.** Drizzle types describe DB rows (snake_case,
-  internal to `apps/api`); Zod types describe the wire contract (camelCase, shared).
+- **Two type layers, never collapsed.** Drizzle types describe DB rows (`Date`
+  columns and an `ownerId`, internal to `apps/api`); Zod types describe the wire
+  contract (ISO strings, no Owner, shared).
   `apps/api/src/tasks/mappers.ts` is the seam. Do not use `drizzle-zod` for the
   shared schemas.
 - **Nothing above `tasks/repository.ts` knows Drizzle exists.** The interface is
