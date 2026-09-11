@@ -4,6 +4,7 @@ import {
   type CreateTaskInput,
   type Task,
   type TaskPage,
+  type UpdateTaskInput,
 } from "@insightt/shared";
 
 import { apiFetch, apiFetchWithHeaders, jsonRequest } from "@/api/client";
@@ -28,6 +29,41 @@ export function listTasks(): Promise<TaskPage> {
  */
 export function createTask(input: CreateTaskInput): Promise<Task> {
   return apiFetch("/api/tasks", TaskSchema, jsonRequest("POST", input));
+}
+
+/** The arguments `updateTask` sends: the edit, and what it was written against. */
+export interface TaskEditRequest {
+  id: string;
+  /** The Version the browser last saw, which becomes the `If-Match`. */
+  version: number;
+  changes: UpdateTaskInput;
+}
+
+/**
+ * Edits a Task, refusing to write over a change made somewhere else.
+ *
+ * The Version travels as `If-Match`, not in the body: it is a precondition on
+ * the request rather than a field being written, and the API rejects a body
+ * that names one. An edit sent against a Version the Task has moved past comes
+ * back `412 VERSION_CONFLICT` rather than quietly winning.
+ *
+ * `changes` carries only the fields being changed. A field the Task's Status
+ * has closed is not one of them — the form does not offer it, and naming it
+ * anyway would be `422 FIELD_NOT_EDITABLE`.
+ */
+export function updateTask({
+  id,
+  version,
+  changes,
+}: TaskEditRequest): Promise<Task> {
+  const init = jsonRequest("PATCH", changes);
+
+  return apiFetch(`/api/tasks/${id}`, TaskSchema, {
+    ...init,
+    // Quoted, because `If-Match` is compared verbatim against the `ETag` the
+    // API issued and that tag is quoted.
+    headers: { ...init.headers, "If-Match": `"${version}"` },
+  });
 }
 
 /** Starts a Task: `PENDING → IN_PROGRESS`. */

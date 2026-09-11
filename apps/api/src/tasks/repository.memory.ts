@@ -6,10 +6,12 @@ import type {
   MarkDoneResult,
   OwnerScopedListQuery,
   OwnerScopedTaskDraft,
+  OwnerScopedTaskEdit,
   OwnerScopedTaskQuery,
   TaskListResult,
   TaskRepository,
   TransitionResult,
+  UpdateResult,
 } from "@/tasks/repository";
 
 /** A Task as it is stored: the wire shape, plus the Owner the wire never sees. */
@@ -107,6 +109,32 @@ export function createMemoryTaskRepository(
       tasks.push(created);
 
       return withoutOwner(created);
+    },
+
+    async update({
+      expectedVersion,
+      changes,
+      ...query
+    }: OwnerScopedTaskEdit): Promise<UpdateResult> {
+      const task = owned(tasks, query);
+
+      if (!task) return { outcome: "not_found" };
+
+      // The Version guard the SQL puts in its `WHERE`, asked here instead.
+      // Without it the fake would accept a write the database refuses, and the
+      // whole optimistic-locking suite would pass against nothing.
+      if (task.version !== expectedVersion) {
+        return { outcome: "stale", task: withoutOwner(task) };
+      }
+
+      // Only the keys the edit named. `Object.assign` with an absent key
+      // changes nothing, which is exactly what an unnamed field should get —
+      // spelling the fields out here would make an omitted one `undefined`.
+      Object.assign(task, changes);
+      task.version += 1;
+      task.updatedAt = new Date().toISOString();
+
+      return { outcome: "changed", task: withoutOwner(task) };
     },
 
     async start(query: OwnerScopedTaskQuery): Promise<TransitionResult> {

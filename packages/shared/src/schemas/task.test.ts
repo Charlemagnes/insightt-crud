@@ -1,4 +1,9 @@
-import { CreateTaskInput, TASK_LIMITS, TaskSchema } from "./task";
+import {
+  CreateTaskInput,
+  TASK_LIMITS,
+  TaskSchema,
+  UpdateTaskInput,
+} from "./task";
 
 const valid = { title: "Write the plan" };
 
@@ -136,6 +141,103 @@ describe("CreateTaskInput", () => {
 
     it("carries no Status of its own", () => {
       expect(CreateTaskInput.parse(valid)).not.toHaveProperty("status");
+    });
+  });
+});
+
+describe("UpdateTaskInput", () => {
+  it("accepts an edit that names only the title", () => {
+    expect(UpdateTaskInput.parse({ title: "Renamed" })).toEqual({
+      title: "Renamed",
+    });
+  });
+
+  it("accepts an edit that names only the description", () => {
+    expect(UpdateTaskInput.parse({ description: "More detail" })).toEqual({
+      description: "More detail",
+    });
+  });
+
+  it("leaves an unnamed field out rather than nulling it", () => {
+    // Omitted means "leave it alone". If the absent key arrived as `null` the
+    // repository would clear a description nobody asked it to clear.
+    expect(UpdateTaskInput.parse({ title: "Renamed" })).not.toHaveProperty(
+      "description",
+    );
+  });
+
+  it("applies the same rules to the title that a create does", () => {
+    expect(UpdateTaskInput.parse({ title: "  Renamed  " }).title).toBe(
+      "Renamed",
+    );
+    expect(UpdateTaskInput.safeParse({ title: "   " }).success).toBe(false);
+    expect(
+      UpdateTaskInput.safeParse({ title: "a".repeat(TASK_LIMITS.title + 1) })
+        .success,
+    ).toBe(false);
+  });
+
+  describe("clearing the description", () => {
+    it("accepts an explicit null", () => {
+      // The one thing omitting the key cannot say.
+      expect(UpdateTaskInput.parse({ description: null })).toEqual({
+        description: null,
+      });
+    });
+
+    it("reads an emptied text area as a cleared description", () => {
+      expect(UpdateTaskInput.parse({ description: "   " })).toEqual({
+        description: null,
+      });
+    });
+  });
+
+  describe("an edit that names nothing", () => {
+    it("rejects an empty object", () => {
+      expect(UpdateTaskInput.safeParse({}).success).toBe(false);
+    });
+
+    it("rejects fields explicitly set to undefined", () => {
+      const result = UpdateTaskInput.safeParse({
+        title: undefined,
+        description: undefined,
+      });
+
+      expect(result.success).toBe(false);
+    });
+
+    it("blames the edit rather than a field", () => {
+      const result = UpdateTaskInput.safeParse({});
+
+      // Path-less on purpose: no single input is at fault, so the form reports
+      // it as a message instead of marking a field that is fine.
+      expect(result.error?.issues[0]?.path).toEqual([]);
+    });
+  });
+
+  describe("strictness", () => {
+    it("rejects a Status rather than silently dropping it", () => {
+      // Status moves through the Transition endpoints only. A PATCH that
+      // quietly ignored one would look, from outside, like a PATCH that
+      // honoured it.
+      const result = UpdateTaskInput.safeParse({
+        title: "Renamed",
+        status: "DONE",
+      });
+
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a mistyped field name", () => {
+      expect(
+        UpdateTaskInput.safeParse({ titel: "oops" }).success,
+      ).toBe(false);
+    });
+
+    it("rejects the Version, which travels as a header and not a field", () => {
+      expect(
+        UpdateTaskInput.safeParse({ title: "Renamed", version: 2 }).success,
+      ).toBe(false);
     });
   });
 });

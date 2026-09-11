@@ -1,4 +1,4 @@
-import type { Task, TaskPage } from "@insightt/shared";
+import type { Task, TaskPage, UpdateTaskInput } from "@insightt/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -6,6 +6,7 @@ import {
   createTask,
   markTaskDone,
   startTask,
+  updateTask,
   type MarkDoneResponse,
 } from "@/api/tasks";
 import { tasksQueryKey } from "@/hooks/useTasks";
@@ -29,10 +30,45 @@ export function useCreateTask() {
   });
 }
 
+/**
+ * An edit: the Task as the browser last saw it, and what to change about it.
+ *
+ * `changes` is the shared `UpdateTaskInput` and not a shape derived from
+ * `Task`. It is the `PATCH` body, `packages/shared` is the authority on
+ * anything that crosses the wire, and deriving it from the response shape would
+ * be the inversion PLAN.md §11 rejects.
+ */
+export interface TaskEdit {
+  task: Task;
+  changes: UpdateTaskInput;
+}
+
+/**
+ * Editing a Task, against the Version the row was read at.
+ *
+ * The row shows the new text before the API confirms it, and goes back to what
+ * it said if the edit is refused. A refusal is the ordinary case here rather
+ * than an exception: a Task edited in another tab raises its Version, and this
+ * edit is then `412 VERSION_CONFLICT` — which `onSettled` already refetches,
+ * so the row the person is left looking at is the current one.
+ */
+export function useUpdateTask() {
+  return useTaskRowMutation<TaskEdit, Task>({
+    run: ({ task, changes }) =>
+      updateTask({ id: task.id, version: task.version, changes }),
+    idOf: ({ task }) => task.id,
+    // Only the fields the edit named. Spreading the whole form would put a
+    // disabled field's value back over one the Status has closed.
+    inFlight: (row, { changes }) => ({ ...row, ...changes }),
+    taskIn: (task) => task,
+  });
+}
+
 /** Starting a Task. The row shows `IN_PROGRESS` before the API confirms it. */
 export function useStartTask() {
   return useTaskRowMutation({
     run: startTask,
+    idOf: identity,
     inFlight: (task) => ({ ...task, status: "IN_PROGRESS" }),
     taskIn: (task) => task,
   });
@@ -46,8 +82,9 @@ export function useStartTask() {
  * two apart, and both overwrite the cache from the same response body.
  */
 export function useMarkTaskDone() {
-  return useTaskRowMutation<MarkDoneResponse>({
+  return useTaskRowMutation<string, MarkDoneResponse>({
     run: markTaskDone,
+    idOf: identity,
     inFlight: (task) => ({ ...task, status: "DONE" }),
     taskIn: (result) => result.task,
   });
@@ -61,16 +98,22 @@ export function useMarkTaskDone() {
 export function useArchiveTask() {
   return useTaskRowMutation({
     run: archiveTask,
+    idOf: identity,
     inFlight: (task) => ({ ...task, status: "ARCHIVED" }),
     taskIn: (task) => task,
   });
 }
 
-interface TaskRowMutation<Result> {
-  /** The request, which every per-row mutation addresses by Task id. */
-  run: (id: string) => Promise<Result>;
-  /** How the row should look while the request is in flight. */
-  inFlight: (task: Task) => Task;
+/** Every Transition addresses its Task by id and asks for nothing else. */
+const identity = (id: string) => id;
+
+interface TaskRowMutation<Variables, Result> {
+  /** The request this mutation makes. */
+  run: (variables: Variables) => Promise<Result>;
+  /** Which row in the cached page the request is about. */
+  idOf: (variables: Variables) => string;
+  /** How that row should look while the request is in flight. */
+  inFlight: (task: Task, variables: Variables) => Task;
   /** The Task in the response, which the cache is corrected from. */
   taskIn: (result: Result) => Task;
 }
@@ -84,32 +127,40 @@ interface TaskRowMutation<Result> {
  * `version` honest. The browser cannot know what the Version became, and a
  * guessed one would be sent as the next `If-Match` and refused as stale.
  *
+ * Invalidating on **settle** rather than on success is what makes a version
+ * conflict a refresh rather than a silent rollback: the edit lost, the rollback
+ * put back a row that is now known to be out of date, and the refetch replaces
+ * it with what the Task actually says.
+ *
  * `cancelQueries` first, because an in-flight list refetch that lands after the
  * optimistic write would put the old row back and make the click look ignored.
  */
-function useTaskRowMutation<Result>({
+function useTaskRowMutation<Variables, Result>({
   run,
+  idOf,
   inFlight,
   taskIn,
-}: TaskRowMutation<Result>) {
+}: TaskRowMutation<Variables, Result>) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: run,
 
-    onMutate: async (id: string) => {
+    onMutate: async (variables: Variables) => {
       await queryClient.cancelQueries({ queryKey: tasksQueryKey });
 
       const snapshot = queryClient.getQueryData<TaskPage>(tasksQueryKey);
 
       queryClient.setQueryData<TaskPage>(tasksQueryKey, (page) =>
-        page ? withRow(page, id, inFlight) : page,
+        page
+          ? withRow(page, idOf(variables), (task) => inFlight(task, variables))
+          : page,
       );
 
       return { snapshot };
     },
 
-    onError: (_error, _id, context) => {
+    onError: (_error, _variables, context) => {
       // Put back exactly what was there. The mutation rejected, so the row the
       // person is looking at has to go back to what the server still holds.
       if (context?.snapshot) {

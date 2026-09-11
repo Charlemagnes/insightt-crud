@@ -1,4 +1,4 @@
-import { TaskStatus } from "../schemas/task";
+import { TaskStatus, type Task, type UpdateTaskInput } from "../schemas/task";
 
 /**
  * The lifecycle, in order. This array **is** the machine: the Status machine is
@@ -72,6 +72,41 @@ const EDITABLE_BY_STATUS: Record<TaskStatus, readonly EditableField[]> = {
 /** Whether `field` may be changed on a Task in `status`. */
 export function canEdit(status: TaskStatus, field: EditableField): boolean {
   return EDITABLE_BY_STATUS[status].includes(field);
+}
+
+/**
+ * The fields an edit would actually change, dropping the ones that already hold
+ * the value they ask for.
+ *
+ * Two callers need the same answer for different reasons, and a second copy is
+ * a second place they could disagree. The edit form sends only what this
+ * returns, so a field the person did not touch is never named and so cannot be
+ * refused by the whitelist. The API asks whether it is empty, and refuses the
+ * edit if it is: the Version is the record that a Task changed, and raising it
+ * for a write that changed nothing would invalidate every other tab's
+ * `If-Match` over an edit that never happened.
+ *
+ * A field the edit did not name is not a change. Omitting a key means "leave it
+ * alone", which is exactly what leaving it out of the result means too.
+ */
+export function changedFields(
+  task: Task,
+  edit: UpdateTaskInput,
+): UpdateTaskInput {
+  const changed: UpdateTaskInput = {};
+
+  // Written out rather than looped, because a loop over `EDITABLE_FIELDS`
+  // cannot assign through a union key without a cast, and a cast here would be
+  // the one place a field could be copied into the wrong slot unnoticed.
+  if (edit.title !== undefined && edit.title !== task.title) {
+    changed.title = edit.title;
+  }
+
+  if (edit.description !== undefined && edit.description !== task.description) {
+    changed.description = edit.description;
+  }
+
+  return changed;
 }
 
 /** Whether any field at all may be changed — what an Edit control asks. */

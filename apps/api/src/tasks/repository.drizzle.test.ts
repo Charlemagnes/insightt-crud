@@ -329,6 +329,148 @@ describe("createDrizzleTaskRepository", () => {
     });
   });
 
+  describe("update", () => {
+    const query = {
+      userId: "auth0|owner",
+      id: "11111111-1111-4111-8111-111111111111",
+    };
+
+    it("updates under a guard on the id, the Owner and the Version", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.update({
+        ...query,
+        expectedVersion: 4,
+        changes: { title: "After" },
+      });
+
+      const [updated] = statements;
+      expect(normalise(updated.text)).toContain('update "tasks"');
+      // The Version in the `WHERE` is what makes this optimistic locking: two
+      // Actors holding the same one both run this and only one matches a row.
+      expect(normalise(updated.text)).toContain(
+        '("tasks"."id" = $2 and "tasks"."owner_id" = $3 and "tasks"."version" = $4)',
+      );
+      expect(updated.values).toEqual(["After", query.id, query.userId, 4]);
+    });
+
+    it("raises the Version so a held ETag stops matching", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.update({
+        ...query,
+        expectedVersion: 1,
+        changes: { title: "After" },
+      });
+
+      expect(normalise(statements[0].text)).toContain(
+        '"version" = "tasks"."version" + 1',
+      );
+    });
+
+    it("assigns only the columns the edit named", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.update({
+        ...query,
+        expectedVersion: 1,
+        changes: { title: "After" },
+      });
+
+      // An unnamed field is not a key in `changes`, so `set` never mentions its
+      // column — the difference between "leave the description alone" and
+      // "write `undefined` over it".
+      const assigned = setClauseOf(statements[0].text);
+      expect(assigned).toContain('"title"');
+      expect(assigned).not.toContain('"description"');
+    });
+
+    it("assigns a null description when the edit asks for one", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.update({
+        ...query,
+        expectedVersion: 1,
+        changes: { description: null },
+      });
+
+      expect(setClauseOf(statements[0].text)).toContain('"description"');
+      expect(statements[0].values).toContain(null);
+    });
+
+    it("leaves updated_at to the trigger", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.update({
+        ...query,
+        expectedVersion: 1,
+        changes: { title: "After" },
+      });
+
+      // `tasks_set_updated_at` maintains it. Assigning it here would be a
+      // second place the modification time is decided, and the trigger's is the
+      // one that holds for a write that does not come from this process.
+      expect(setClauseOf(statements[0].text)).not.toContain("updated_at");
+    });
+
+    it("never assigns the Status", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.update({
+        ...query,
+        expectedVersion: 1,
+        changes: { title: "After" },
+      });
+
+      // A Task moves through the Transition endpoints only, so that
+      // `mark_task_done()` stays the single entrance to DONE.
+      expect(setClauseOf(statements[0].text)).not.toContain("status");
+    });
+
+    it("reads nothing more when the update changed a row", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      const result = await repository.update({
+        ...query,
+        expectedVersion: 1,
+        changes: { title: "After" },
+      });
+
+      expect(result).toMatchObject({ outcome: "changed" });
+      expect(statements).toHaveLength(1);
+    });
+
+    it("reports a Task that is still there as stale, not missing", async () => {
+      // The guarded update matches nothing; the follow-up read finds the Task.
+      const { repository, statements } = recordingRepository([], [aTaskRow()]);
+
+      const result = await repository.update({
+        ...query,
+        expectedVersion: 1,
+        changes: { title: "After" },
+      });
+
+      expect(statements).toHaveLength(2);
+      // 412 rather than 404: the Task is real and owned, it has just moved on.
+      expect(result).toMatchObject({ outcome: "stale" });
+    });
+
+    it("reports a Task that is not the Actor's as missing", async () => {
+      const { repository, statements } = recordingRepository([]);
+
+      const result = await repository.update({
+        ...query,
+        expectedVersion: 1,
+        changes: { title: "After" },
+      });
+
+      // Owner-scoped like every other read, so someone else's Task is simply
+      // absent rather than forbidden.
+      expect(statements[1].values).toEqual([query.id, query.userId, 1]);
+      expect(result).toEqual({ outcome: "not_found" });
+    });
+  });
+
   describe("start", () => {
     const query = {
       userId: "auth0|owner",

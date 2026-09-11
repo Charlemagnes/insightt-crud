@@ -254,9 +254,29 @@ carry `ETag: "<version>"`. `PATCH` requires `If-Match`:
 |---|---|
 | `If-Match` absent | `428` `PRECONDITION_REQUIRED` |
 | `If-Match` stale | `412` `VERSION_CONFLICT` |
+| `If-Match` unreadable as a version (`*`, a weak tag) | `412` `VERSION_CONFLICT` |
 
 `412` rather than `409` so the frontend can tell "someone else changed this" from
-"that action isn't allowed here" without string-matching a message.
+"that action isn't allowed here" without string-matching a message. An `If-Match`
+that names no version this API could have issued is left to fail the comparison
+rather than rejected separately: no task is at a version that cannot be written
+down, so it can only ever be stale.
+
+**`*` is a deliberate deviation from RFC 9110.** The standard defines
+`If-Match: *` as matching any existing representation, which would make it a
+success — an edit that says "whatever version it's on, write anyway". That is
+precisely the clobbering this endpoint exists to refuse, and there is no client
+of this API that wants it: the frontend always holds a real ETag. So `*` fails
+the comparison like any other unreadable tag and is answered `412`. Anything
+that needs an unconditional write can re-read the task and send the version it
+gets back.
+
+**A `PATCH` that would change nothing is refused**, as `422 VALIDATION_FAILED` —
+both the empty body `{}`, which the shared schema's refinement catches, and a
+body whose every field already holds the value it asks for, which needs the task
+and so is checked in the route. The version is the record that a task changed;
+raising it for a write that changed nothing would invalidate every other tab's
+`If-Match` over an edit that never happened.
 
 **Pagination.** Offset-based, since Ant Design's `Table` needs a total count.
 The list query selects `count(*) over() as total` alongside the rows, so one
@@ -281,7 +301,7 @@ Errors return `{ error: { code, message, details? } }`.
 |---|---|---|
 | `UNAUTHENTICATED` | 401 | missing, invalid or expired token |
 | `NOT_FOUND` | 404 | no such task, or not owned by the Actor |
-| `VALIDATION_FAILED` | 422 | payload fails Zod; `details` carries `error.issues`. Also covers a body `express.json` could not read at all — unparseable or over the size limit — reported as `422` rather than the parser's own `400`/`413` so this table stays the whole vocabulary, with the parser's reason in `details` |
+| `VALIDATION_FAILED` | 422 | payload fails Zod; `details` carries `error.issues`. Also covers a body `express.json` could not read at all — unparseable or over the size limit — reported as `422` rather than the parser's own `400`/`413` so this table stays the whole vocabulary, with the parser's reason in `details`. And a `PATCH` that would change nothing: the body passes Zod but asks for values the task already holds, so there is no field to blame and no `details` |
 | `FIELD_NOT_EDITABLE` | 422 | field not mutable in the task's current status |
 | `INVALID_TRANSITION` | 409 | transition not permitted from the current status |
 | `VERSION_CONFLICT` | 412 | `If-Match` present but stale |
@@ -313,7 +333,15 @@ owner-scoped end to end, so a non-owner cannot address the task at all.
 
 **Field mutability by status.** A documented whitelist; no typo-detection
 heuristic, no similarity threshold. Anything outside it is
-`422 FIELD_NOT_EDITABLE`.
+`422 FIELD_NOT_EDITABLE`. The whitelist needs the task, so `PATCH` reads it
+before it writes — and **the version is checked against that read first, before
+the whitelist or the no-op check**. Both of those answer questions about a
+particular task, and the one just read is only the caller's task while the
+version still matches: an edit written against a `PENDING` task that has since
+gone `DONE` is a stale copy, not a closed field, and reporting it as
+`FIELD_NOT_EDITABLE` would name a status the caller never saw. The guard in the
+`UPDATE`'s own `WHERE` stays as well; the early check is what makes the refusals
+honest, and the one in the statement is what makes the write safe.
 
 | Status | Edit title | Edit description | Delete | Next transition |
 |---|---|---|---|---|
@@ -507,7 +535,7 @@ export const UpdateTaskInput = z.strictObject({
   title: title.optional(),
   description: description.optional(),
 }).refine(v => v.title !== undefined || v.description !== undefined,
-          { message: 'At least one field must be provided' });
+          { message: 'An edit must change the title or the description' });
 
 export const TaskListQuery = z.object({
   page:     z.coerce.number().int().min(1).default(1),
