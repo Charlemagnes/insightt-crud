@@ -1,0 +1,7 @@
+# Generated. Prettier must not reformat these, or it fights whatever writes
+# them: `npm run docs:api` for the API description, drizzle-kit for the
+# migration snapshots, npm for the lockfile, Next for its ambient types.
+docs/openapi.json
+apps/api/drizzle/meta/
+package-lock.json
+next-env.d.ts

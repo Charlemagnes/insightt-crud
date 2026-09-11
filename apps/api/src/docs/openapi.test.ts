@@ -61,9 +61,11 @@ describe("buildOpenApiDocument", () => {
 
   describe("schemas", () => {
     it("carries the Status machine's own spelling of the enum", () => {
-      expect(document.components.schemas.Task.properties?.status).toMatchObject({
-        enum: TaskStatus.options,
-      });
+      expect(document.components.schemas.Task.properties?.status).toMatchObject(
+        {
+          enum: TaskStatus.options,
+        },
+      );
     });
 
     it("carries the frozen error vocabulary", () => {
@@ -227,9 +229,7 @@ interface RouterLayer {
 
 /** `/:id/done` is `/{id}/done` in OpenAPI, and `/` is the collection itself. */
 function openApiPath(expressPath: string): string {
-  return expressPath === "/"
-    ? ""
-    : expressPath.replace(/:([^/]+)/g, "{$1}");
+  return expressPath === "/" ? "" : expressPath.replace(/:([^/]+)/g, "{$1}");
 }
 
 function parameterNames(operation: Operation, location: string): string[] {

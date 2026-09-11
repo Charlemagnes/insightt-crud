@@ -61,8 +61,13 @@ export function Auth0Provider({ children }: { children: ReactNode }) {
  * read the session without a hook.
  */
 function SessionMirror() {
-  const { user, isAuthenticated, isLoading, getAccessTokenSilently, loginWithRedirect } =
-    useAuth0();
+  const {
+    user,
+    isAuthenticated,
+    isLoading,
+    getAccessTokenSilently,
+    loginWithRedirect,
+  } = useAuth0();
   const setSession = useSessionStore((state) => state.setSession);
 
   useEffect(() => {

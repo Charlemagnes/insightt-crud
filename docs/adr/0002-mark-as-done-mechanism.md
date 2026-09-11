@@ -24,7 +24,7 @@ is no Vercel deployment in this project for one to live in.
 
 Express endpoint over a Postgres function.
 
-The deciding factor is *where the race has to be resolved*. Marking Done must be
+The deciding factor is _where the race has to be resolved_. Marking Done must be
 atomic and idempotent: two simultaneous requests must produce one completion and
 two identical `200`s, and the "why did zero rows change?" read belongs inside
 the same transaction as the conditional `UPDATE`, or the window in which a task

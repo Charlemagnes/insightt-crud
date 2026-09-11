@@ -34,6 +34,7 @@ npm run db:seed -- '<user id>' # demo Tasks under one Owner; add 'replace' to cl
 npm run test                   # Jest, per workspace: apps/api, packages/shared, apps/web
 npm run test:e2e               # Cypress — boots both dev servers, runs the spec, stops them
 npm run docs:api               # z.toJSONSchema() -> docs/openapi.json
+npm run format                 # prettier --write over the repo
 ```
 
 ## Layout
@@ -53,6 +54,17 @@ Both apps depend on `@insightt/shared`; neither depends on the other. The root
 `package.json` is workspace declarations and orchestration only. `PLAN.md` §3 has
 the file-level structure inside each workspace — follow it rather than inventing
 folders.
+
+## Pre-commit
+
+A Husky hook runs lint-staged (Prettier over the staged files), `docs:api`
+staleness, `typecheck` and the full Jest suite. Installed by `npm install`;
+skip it with `git commit --no-verify`.
+
+`.prettierrc` is deliberately near-empty — the repo uses Prettier's defaults —
+but it must **exist**, because Prettier searches upward out of the repo and
+will otherwise adopt a stray config from an ancestor directory. Generated files
+are in `.prettierignore`; do not format them.
 
 ## Conventions
 
@@ -105,9 +117,9 @@ v16 APIs differ from older releases.
   cap or enum member is ever restated. Only what Zod cannot know — the routes,
   their headers, the error codes each answers with — is written by hand there,
   and `openapi.test.ts` holds that half against the real Express router, and
-  the document against the checked-in `docs/openapi.json`. A Husky pre-commit
-  hook regenerates the file and refuses the commit if that changed anything, so
-  run `npm run docs:api` after touching a schema or a route. Served at
+  the document against the checked-in `docs/openapi.json`. The pre-commit hook
+  regenerates the file and refuses the commit if that changed anything, so run
+  `npm run docs:api` after touching a schema or a route. Served at
   `/api/docs` outside production only — `docs/router.ts` says why.
 - **Triggers and functions are hand-written migrations.** `drizzle-kit` diffs
   tables only, so `npm run db:generate -- --custom --name <what>` and write the

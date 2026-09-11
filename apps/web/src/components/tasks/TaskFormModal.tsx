@@ -258,4 +258,3 @@ function valuesOf(task: Task): TaskFormValues {
 function isEditable(task: Task | undefined, field: EditableField): boolean {
   return task === undefined || canEdit(task.status, field);
 }
-

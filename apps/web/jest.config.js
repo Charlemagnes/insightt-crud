@@ -82,7 +82,11 @@ module.exports = async () => {
   const resolved = await createConfig();
   const patterns = resolved.transformIgnorePatterns.map(alsoTransform);
 
-  if (patterns.every((pattern, i) => pattern === resolved.transformIgnorePatterns[i])) {
+  if (
+    patterns.every(
+      (pattern, i) => pattern === resolved.transformIgnorePatterns[i],
+    )
+  ) {
     throw new Error(
       "jest.config.js: transformIgnorePatterns took none of the ESM_ONLY " +
         "exceptions. `transpilePackages` in next.config.ts is the usual cause — " +

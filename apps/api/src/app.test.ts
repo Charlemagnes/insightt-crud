@@ -151,7 +151,9 @@ describe("createApp", () => {
         .set("Content-Type", "application/json")
         .send({ title: "x".repeat(5000) });
 
-      expect(JSON.stringify(lines("inbound")[0].body).length).toBeLessThan(2000);
+      expect(JSON.stringify(lines("inbound")[0].body).length).toBeLessThan(
+        2000,
+      );
     });
   });
 

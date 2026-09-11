@@ -1,17 +1,26 @@
-# Regenerate the API description and refuse the commit if that changed
-# anything. `docs/openapi.json` is generated from the Zod schemas in
-# `@insightt/shared` (CLAUDE.md, "The API description is generated, not
-# written"), so a commit that edits a schema or a route and leaves the file
-# behind records a description that no longer matches the API.
-#
-# `openapi.test.ts` asserts the same thing, but only when the suite runs. This
-# is the check that catches it at the moment it would enter history.
-#
-# It refuses rather than staging the file itself: what gets committed should be
-# what you staged, and a hook that quietly widens a commit is worse than one
-# that asks.
+# Four checks, cheapest first, so the slow one only runs on a commit that has
+# already passed the others.
 
-# stdout only says which file it wrote; a real failure still reaches stderr.
+# 1. Prettier over the staged files, which lint-staged re-stages. Formatting is
+#    not a thing to have an opinion about twice, so nothing here reports it —
+#    it is simply fixed. `--ignore-unknown` skips what Prettier cannot parse.
+npx lint-staged
+
+# 2. Regenerate the API description and refuse the commit if that changed
+#    anything. `docs/openapi.json` is generated from the Zod schemas in
+#    `@insightt/shared` (CLAUDE.md, "The API description is generated, not
+#    written"), so a commit that edits a schema or a route and leaves the file
+#    behind records a description that no longer matches the API.
+#
+#    `openapi.test.ts` asserts the same thing, but only when the suite runs.
+#    This is the check that catches it at the moment it would enter history.
+#
+#    It refuses rather than staging the file itself: what gets committed should
+#    be what you staged, and a hook that quietly widens a commit is worse than
+#    one that asks. (lint-staged re-staging its own formatting is the exception
+#    that proves it — that changes how the staged files read, not which.)
+#
+#    stdout only says which file it wrote; a real failure still reaches stderr.
 npm run docs:api --silent >/dev/null
 
 if ! git diff --quiet -- docs/openapi.json; then
@@ -23,3 +32,10 @@ if ! git diff --quiet -- docs/openapi.json; then
   echo
   exit 1
 fi
+
+# 3. Type-check every workspace, plus cypress/, which is not one.
+npm run typecheck
+
+# 4. The whole Jest suite. Around twenty seconds; `git commit --no-verify`
+#    skips the lot when you need to record work in progress.
+npm run test

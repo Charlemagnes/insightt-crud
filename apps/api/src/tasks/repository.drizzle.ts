@@ -34,7 +34,9 @@ function requireStatusBefore(to: TaskStatus): TaskStatus {
   const from = statusBefore(to);
 
   if (!from) {
-    throw new Error(`Nothing transitions into ${to}; it is where a Task starts`);
+    throw new Error(
+      `Nothing transitions into ${to}; it is where a Task starts`,
+    );
   }
 
   return from;
@@ -178,7 +180,10 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
       return transition(db, query, "ARCHIVED", ARCHIVES_FROM);
     },
 
-    async markDone({ userId, id }: OwnerScopedTaskQuery): Promise<MarkDoneResult> {
+    async markDone({
+      userId,
+      id,
+    }: OwnerScopedTaskQuery): Promise<MarkDoneResult> {
       // The whole decision happens in the function, in one transaction: the
       // conditional UPDATE, and the read that explains a zero-row result. See
       // `drizzle/0002_mark_task_done.sql` and ADR-0002.
@@ -189,7 +194,6 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
       // `db.execute` returns whatever Postgres sent, typed as loosely as that
       // implies, so the contract is re-established here rather than asserted.
       const row = MarkTaskDoneRow.parse(result.rows[0]);
-
 
       return row.outcome === "not_found"
         ? { outcome: "not_found" }

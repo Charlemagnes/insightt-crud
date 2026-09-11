@@ -110,7 +110,9 @@ const normalise = (text: string) => text.replaceAll(/\s+/g, " ").trim();
  * to look here and not at the whole text, where every column is named.
  */
 const setClauseOf = (text: string) =>
-  normalise(text).replace(/^.*?\bset\b\s*/, "").replace(/\s*\bwhere\b.*$/, "");
+  normalise(text)
+    .replace(/^.*?\bset\b\s*/, "")
+    .replace(/\s*\bwhere\b.*$/, "");
 
 describe("createDrizzleTaskRepository", () => {
   describe("list", () => {
@@ -478,9 +480,7 @@ describe("createDrizzleTaskRepository", () => {
     };
 
     it("deletes under a guard on the id and the Owner", async () => {
-      const { repository, statements } = recordingRepository([
-        [query.id],
-      ]);
+      const { repository, statements } = recordingRepository([[query.id]]);
 
       await repository.delete(query);
 
@@ -604,7 +604,7 @@ describe("createDrizzleTaskRepository", () => {
       const result = await repository.start(query);
 
       expect(statements).toHaveLength(2);
-      expect(normalise(statements[1].text)).toContain('select');
+      expect(normalise(statements[1].text)).toContain("select");
       // Owner-scoped like every other read.
       expect(statements[1].values).toEqual([query.id, query.userId, 1]);
       expect(result).toEqual({ outcome: "not_found" });

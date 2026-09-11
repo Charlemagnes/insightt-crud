@@ -27,9 +27,10 @@ describe("Signing in and seeing the task list", () => {
     cy.wait("@listTasks").then(({ response }) => {
       // Minted by one Auth0 client, stored under another's cache key (see
       // `support/auth0.ts`): a `200` is Express having accepted it anyway.
-      expect(response?.statusCode, "the API accepted the seeded token").to.equal(
-        200,
-      );
+      expect(
+        response?.statusCode,
+        "the API accepted the seeded token",
+      ).to.equal(200);
 
       const page = response?.body as TaskPage;
 

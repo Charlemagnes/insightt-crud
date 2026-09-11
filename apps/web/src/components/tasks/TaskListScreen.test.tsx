@@ -53,8 +53,12 @@ describe("the task list", () => {
     renderTaskList();
 
     expect(await screen.findByText("Write the plan")).toBeInTheDocument();
-    expect(within(rowFor("Ship the API")).getByText("In progress")).toBeInTheDocument();
-    expect(within(rowFor("Retire the spike")).getByText("Archived")).toBeInTheDocument();
+    expect(
+      within(rowFor("Ship the API")).getByText("In progress"),
+    ).toBeInTheDocument();
+    expect(
+      within(rowFor("Retire the spike")).getByText("Archived"),
+    ).toBeInTheDocument();
   });
 
   it("re-renders the row as Done when an in-progress Task is marked done", async () => {
@@ -65,7 +69,9 @@ describe("the task list", () => {
 
     await userEvent.click(buttonIn("Ship the API", "Mark done"));
 
-    expect(await within(rowFor("Ship the API")).findByText("Done")).toBeInTheDocument();
+    expect(
+      await within(rowFor("Ship the API")).findByText("Done"),
+    ).toBeInTheDocument();
     expect(await screen.findByText("Task done")).toBeInTheDocument();
   });
 
@@ -99,10 +105,16 @@ describe("the task list", () => {
 
     await userEvent.click(buttonIn("Ship the API", "Mark done"));
 
-    expect(await screen.findByText("That task was already done")).toBeInTheDocument();
+    expect(
+      await screen.findByText("That task was already done"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Task done")).not.toBeInTheDocument();
-    expect(screen.queryByText("Could not mark the task done")).not.toBeInTheDocument();
-    expect(await within(rowFor("Ship the API")).findByText("Done")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Could not mark the task done"),
+    ).not.toBeInTheDocument();
+    expect(
+      await within(rowFor("Ship the API")).findByText("Done"),
+    ).toBeInTheDocument();
   });
 
   /**
