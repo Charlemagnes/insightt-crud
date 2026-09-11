@@ -1,6 +1,7 @@
 "use client";
 
 import { Button, Flex, Layout } from "antd";
+import { useEffect } from "react";
 
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { AppHeader } from "@/components/shared/AppHeader";
@@ -26,7 +27,7 @@ export default function Home() {
 }
 
 function TaskListScreen() {
-  const { data, isPending, isPlaceholderData, isError, error, refetch } =
+  const { data, isFetched, isPending, isPlaceholderData, isError, error, refetch } =
     useTasks();
   const status = useTaskListStore((state) => state.status);
   const filterByStatus = useTaskListStore((state) => state.filterByStatus);
@@ -36,18 +37,54 @@ function TaskListScreen() {
   const closeForm = useTaskListStore((state) => state.closeForm);
 
   const items = data?.items ?? [];
+  const editingTaskId = formTarget?.mode === "edit" ? formTarget.taskId : null;
 
   // The Task under edit is looked up in the fetched page rather than kept in
   // the store, which holds only its id: the rows belong to TanStack Query, and
   // a copy would be a second cache to reconcile on every mutation (PLAN.md §12).
-  //
-  // Not finding it closes the form, which is the honest answer — the Task it
-  // was open on has been deleted, or a filter has moved the list off it.
   const editing =
-    formTarget?.mode === "edit"
-      ? items.find((task) => task.id === formTarget.taskId)
-      : undefined;
+    editingTaskId === null
+      ? undefined
+      : items.find((task) => task.id === editingTaskId);
   const formOpen = formTarget?.mode === "create" || editing !== undefined;
+
+  // Nothing else notices when the Task the form is open on leaves the list —
+  // deleted in another tab, or moved out from under the current filter. The
+  // store has to be cleared and not merely the modal hidden: a target left
+  // pointing at a Task that is no longer here would reopen the form by itself
+  // the moment the row came back into view.
+  //
+  // `isFetched` is what keeps this off the first load and off a page change,
+  // where the list is legitimately without the Task and nothing has gone
+  // anywhere yet.
+  useEffect(() => {
+    if (isFetched && editingTaskId !== null && editing === undefined) {
+      closeForm();
+    }
+  }, [isFetched, editingTaskId, editing, closeForm]);
+
+  // One question, asked once: a filtered list with no rows is not an empty
+  // account, and offering to create a first Task there would answer a question
+  // nobody asked — the Tasks exist, this Status has none.
+  const empty = status
+    ? {
+        description: "No tasks with this status.",
+        action: (
+          <Button onClick={() => filterByStatus(null)}>
+            Show all statuses
+          </Button>
+        ),
+      }
+    : {
+        description: "No tasks yet.",
+        // The same modal the button above opens, reached from the one place a
+        // person with no Tasks is actually looking.
+        action: (
+          <Button type="primary" onClick={openCreate}>
+            Create your first task
+          </Button>
+        ),
+      };
 
   return (
     <Layout style={{ minHeight: "100vh", background: "transparent" }}>
@@ -77,25 +114,8 @@ function TaskListScreen() {
               // page and dims it instead of emptying the table (PLAN.md §13).
               loading={isPending || isPlaceholderData}
               onEdit={(task) => openEdit(task.id)}
-              // A filtered list with no rows is not an empty account, and
-              // offering to create the first Task there would be answering a
-              // question nobody asked — the Tasks exist, this Status has none.
-              emptyDescription={
-                status ? "No tasks with this status." : "No tasks yet."
-              }
-              emptyAction={
-                status ? (
-                  <Button onClick={() => filterByStatus(null)}>
-                    Show all statuses
-                  </Button>
-                ) : (
-                  // The same modal the button above opens, reached from the one
-                  // place a person with no Tasks is actually looking.
-                  <Button type="primary" onClick={openCreate}>
-                    Create your first task
-                  </Button>
-                )
-              }
+              emptyDescription={empty.description}
+              emptyAction={empty.action}
             />
           </Flex>
         )}

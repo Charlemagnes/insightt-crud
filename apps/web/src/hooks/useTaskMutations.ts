@@ -219,20 +219,22 @@ function useOptimisticPage<Variables, Result>({
     },
 
     // The third argument is what `onMutate` returned, not TanStack's own
-    // context — which is the fourth, and is not what either of these wants.
-    onError: (_error, _variables, mutated) => {
+    // context — which is the fourth, and is not what either of these wants. It
+    // is optional here only because `onMutate` may not have run at all.
+    onError: (_error, _variables, recorded) => {
       // Put back exactly what was there, on the page it was taken from — the
       // filter may have moved on since, and writing the snapshot to whatever is
       // on screen now would restore a row onto a page it was never part of.
-      if (mutated?.snapshot) {
-        queryClient.setQueryData(mutated.pageKey, mutated.snapshot);
+      if (recorded?.snapshot) {
+        queryClient.setQueryData(recorded.pageKey, recorded.snapshot);
       }
     },
 
-    onSuccess: (result, _variables, mutated) => {
+    onSuccess: (result, _variables, recorded) => {
       if (!confirmed) return;
 
-      queryClient.setQueryData<TaskPage>(mutated.pageKey, (page) =>
+      // The same page `onMutate` wrote to, for the same reason.
+      queryClient.setQueryData<TaskPage>(recorded.pageKey, (page) =>
         page ? confirmed(page, result) : page,
       );
     },

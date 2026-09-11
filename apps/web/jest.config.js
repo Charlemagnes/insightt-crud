@@ -3,9 +3,10 @@
  * transform `next dev` does, reads `@/*` out of `tsconfig.json`, and knows how
  * to load `@insightt/shared` as the raw TypeScript it ships (PLAN.md §15).
  *
- * `jsdom` because the tests that matter here render components. A store test
- * would run in `node`, but splitting the project in two to save a DOM nobody
- * notices would cost more than it saves.
+ * `jsdom` because §15's integration test renders the list through React
+ * Testing Library. The view-state tests here would run under `node`, but
+ * splitting the workspace into two Jest projects to spare them a DOM they never
+ * touch would cost more than the DOM does.
  */
 const nextJest = require("next/jest");
 

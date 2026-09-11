@@ -3,6 +3,7 @@ import {
   TaskSchema,
   type CreateTaskInput,
   type Task,
+  type TaskListQuery,
   type TaskPage,
   type TaskStatus,
   type UpdateTaskInput,
@@ -19,19 +20,18 @@ import {
 const TRANSITION_REQUEST: RequestInit = { method: "POST" };
 
 /**
- * Which page of Tasks to read, and how to narrow it.
+ * Which page of Tasks to read, and how to narrow it — the shared query schema's
+ * own fields, not a second copy of them (PLAN.md §11).
  *
- * The same three values the list view state holds, spelled here rather than
- * imported from the store: the store decides what the person is looking at, and
- * this decides what that becomes on the wire. A request shape that imported a
- * store would put the browser's state management into the API client.
+ * `status` is the one field that differs, and only in how "no filter" is
+ * spelled. The schema has it optional because a query string says so by leaving
+ * the key out; a view has to hold an answer either way, and `null` is that
+ * answer — an absent property would make "unfiltered" and "not decided yet" the
+ * same value, which is how a filter reset goes missing.
  */
-export interface TaskListParams {
-  page: number;
-  pageSize: number;
-  /** `null` asks for every Status, Archived included — it sends no filter. */
+export type TaskListParams = Omit<TaskListQuery, "status"> & {
   status: TaskStatus | null;
-}
+};
 
 /** One page of the Actor's own Tasks, newest first. */
 export function listTasks({

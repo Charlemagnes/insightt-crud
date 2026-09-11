@@ -12,10 +12,10 @@ import { useTaskListStore } from "@/stores/taskList";
 const { Text } = Typography;
 
 /**
- * The sizes the pager offers. Both ends come off the shared rule rather than
- * being typed here, so no option can ask for a page the API refuses — a size
- * selector that offered 250 would produce a `422` on a control the UI itself
- * put there.
+ * The sizes the pager offers. The two that carry a rule — the default the API
+ * serves when asked for nothing, and the cap it refuses beyond — come off
+ * `TASK_PAGE` rather than being typed here, so no option can ask for a page the
+ * API answers with `422`. The steps between them are only steps.
  */
 const PAGE_SIZES = [TASK_PAGE.defaultSize, 20, 50, TASK_PAGE.maxSize];
 

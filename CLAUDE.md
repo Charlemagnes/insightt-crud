@@ -30,7 +30,7 @@ npm run lint                   # fans out to each workspace; eslint flat config 
 npm run db:generate            # drizzle-kit — generate a migration from schema.ts
 npm run db:migrate             # apply migrations
 npm run db:seed -- '<user id>' # demo Tasks under one Owner; add 'replace' to clear theirs first
-npm run test                   # Jest: unit (apps/api, packages/shared) + integration (apps/web)
+npm run test                   # Jest, per workspace: apps/api, packages/shared, apps/web
 npm run test:e2e               # Cypress
 npm run docs:api               # z.toJSONSchema() -> docs/openapi.json
 ```
