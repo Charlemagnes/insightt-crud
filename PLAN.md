@@ -79,6 +79,7 @@ apps/web/src/     app/{layout,page}.tsx
                   components/shared/  AppHeader  FullPageSpin
                                       ErrorState  EmptyState
                   api/{client,tasks}.ts
+                  forms/zodFieldErrors.ts
                   hooks/{useTasks,useTaskMutations}.ts
                   stores/{session,taskList}.ts
 
@@ -88,8 +89,13 @@ packages/shared/  src/index.ts
 ```
 
 Components are grouped by the screen they belong to, with `shared/` for the
-pieces both screens reach for. `hooks/`, `stores/` and `api/` stay flat; there
-are four files between them and nesting would be ceremony.
+pieces both screens reach for. `hooks/`, `stores/`, `api/` and `forms/` stay
+flat; there are five files between them and nesting would be ceremony.
+
+`forms/zodFieldErrors.ts` is the §11 adapter between a Zod parse and Ant
+Design's `Form`, and it is a folder of its own rather than a `components/`
+neighbour because it renders nothing — the alternative is a per-field
+`validator`, which is the shared rules written a second time for the browser.
 
 `tasks/mappers.ts` is kept even though it looks like ceremony — it is the file
 that makes §11's Drizzle-row-vs-wire-contract separation visible in ten seconds
@@ -537,9 +543,11 @@ Consumption:
 - **Frontend** — the same schemas parse responses inside the TanStack Query
   `queryFn`, so a backend shape change surfaces as an error at the boundary
   instead of an `undefined` deep in a component.
-- **Ant Design forms** — `Form` does not consume Zod natively. One helper:
-  `safeParse` on submit, map `error.issues` onto `form.setFields`. No per-field
-  `validator` wiring.
+- **Ant Design forms** — `Form` does not consume Zod natively. One helper,
+  `forms/zodFieldErrors.ts`: `safeParse` on submit, map `error.issues` onto
+  `form.setFields`. No per-field `validator` wiring. It returns the issues it
+  could not place — `strictObject` refusing a stray key names no field — so the
+  form shows those instead of appearing to ignore the submit.
 
 **Two type layers, kept separate.** Drizzle also infers types from the table.
 These are not the same thing and must not be collapsed:
@@ -691,7 +699,10 @@ boots already authenticated with no cross-origin redirect. The spec stays
 **read-only** — log in, assert the list renders — so there is no teardown.
 `cy.origin()` is the fallback if the Password grant cannot be enabled.
 
-Config: `next/jest` in `apps/web`, `ts-jest` (CJS preset) in `apps/api`.
+Config: `next/jest` in `apps/web`, `ts-jest` (CJS preset) in `apps/api`, and
+`ts-jest` in `packages/shared` with `module: commonjs` overridden for the test
+run only — the package's own `tsconfig.json` targets the bundlers that consume
+it, which means ESM, and ts-jest on ESM is the tarpit §2 avoids in `apps/api`.
 
 **Known landmine, budget an hour:** MSW v2 is ESM-first and needs polyfills
 under Jest + jsdom (`TextEncoder`, `TransformStream`, `BroadcastChannel`,

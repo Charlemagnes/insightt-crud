@@ -28,6 +28,20 @@ export class ApiError extends Error {
 }
 
 /**
+ * A request that carries a JSON body. It exists so that no call site spells the
+ * `Content-Type` out: `express.json` ignores a body that does not claim to be
+ * JSON, leaving the handler an empty one, and the mistake then surfaces as a
+ * validation error about a field that is missing rather than the header that is.
+ */
+export function jsonRequest(method: string, body: unknown): RequestInit {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+
+/**
  * The one place a request reaches the API. It attaches the bearer token, parses
  * the response against the shared schema, and turns the error envelope into an
  * `ApiError`.

@@ -7,9 +7,13 @@
   },
   "types": "./src/index.ts",
   "devDependencies": {
+    "@types/jest": "^30",
+    "jest": "^30",
+    "ts-jest": "^29",
     "typescript": "^5"
   },
   "scripts": {
+    "test": "jest",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

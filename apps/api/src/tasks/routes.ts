@@ -1,4 +1,5 @@
 import {
+  CreateTaskInput,
   TaskIdParam,
   TaskListQuery,
   type Task,
@@ -14,6 +15,7 @@ import type { TaskRepository } from "@/tasks/repository";
 
 const listValidator = validate({ query: TaskListQuery });
 const taskIdValidator = validate({ params: TaskIdParam });
+const createValidator = validate({ body: CreateTaskInput });
 
 /**
  * The Task routes, mounted behind the auth stack — so `actorOf` always has an
@@ -54,6 +56,24 @@ export function createTaskRoutes(repository: TaskRepository): Router {
     }
 
     sendTask(res, task);
+  });
+
+  router.post("/", createValidator, async (req, res) => {
+    const { title, description } = createValidator.read(req).body;
+
+    const created = await repository.create({
+      userId: actorOf(req).userId,
+      title,
+      // Omitted and blank are the same absence, and they are stored as the same
+      // `null`. Passing `undefined` through would let the column default decide
+      // what "no description" means in a second place.
+      description: description ?? null,
+    });
+
+    // `201`, with the Task the client did not have all of: it is the id and the
+    // Version that the next edit needs, and neither existed until now.
+    res.status(201);
+    sendTask(res, created);
   });
 
   return router;

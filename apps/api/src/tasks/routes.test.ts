@@ -1,9 +1,11 @@
 import { TaskPageSchema, TaskSchema } from "@insightt/shared";
 import request from "supertest";
 
+import { createMemoryTaskRepository } from "@/tasks/repository.memory";
 import {
   aTask,
   asWireTask,
+  authenticateAs,
   harness,
   OTHER_USER_ID,
   TEST_USER_ID,
@@ -239,5 +241,257 @@ describe("GET /api/tasks/:id", () => {
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe("NOT_FOUND");
     expect(findById).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/tasks", () => {
+  const draft = { title: "Write the plan" };
+
+  it("creates the Task and returns it as 201", async () => {
+    const { app } = harness();
+
+    const response = await request(app).post("/api/tasks").send(draft);
+
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      title: "Write the plan",
+      description: null,
+      version: 1,
+      completedAt: null,
+    });
+  });
+
+  it("returns a response the shared schema accepts", async () => {
+    const { app } = harness();
+
+    const response = await request(app).post("/api/tasks").send(draft);
+
+    expect(() => TaskSchema.parse(response.body)).not.toThrow();
+  });
+
+  it("carries the new Task's Version as an ETag", async () => {
+    const { app } = harness();
+
+    const response = await request(app).post("/api/tasks").send(draft);
+
+    // The frontend hands this straight back as `If-Match` on the first edit,
+    // so a create that omitted it would make the next edit a round trip longer.
+    expect(response.headers.etag).toBe('"1"');
+  });
+
+  it("makes the new Task appear in the Actor's list", async () => {
+    const { app } = harness();
+
+    const created = await request(app).post("/api/tasks").send(draft);
+    const list = await request(app).get("/api/tasks");
+
+    expect(idsOf(list.body.items)).toEqual([created.body.id]);
+    expect(list.body.total).toBe(1);
+  });
+
+  describe("the starting Status", () => {
+    it("creates the Task PENDING", async () => {
+      const { app } = harness();
+
+      const response = await request(app).post("/api/tasks").send(draft);
+
+      expect(response.body.status).toBe("PENDING");
+    });
+
+    it("refuses a payload that names a Status at all", async () => {
+      const { app } = harness();
+
+      const response = await request(app)
+        .post("/api/tasks")
+        .send({ ...draft, status: "DONE" });
+
+      // Rejected rather than ignored. A silently dropped Status would look, to
+      // the caller, exactly like one that had been honoured -- and
+      // `mark_task_done()` has to stay the only entrance to DONE (PLAN.md §8).
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+  });
+
+  describe("Owner scoping", () => {
+    it("stores the new Task under the Actor", async () => {
+      const create = jest.fn(async () => asWireTask(aTask()));
+      const { app } = harness({ taskRepository: { create } });
+
+      await request(app).post("/api/tasks").send(draft);
+
+      expect(create).toHaveBeenCalledWith({
+        userId: TEST_USER_ID,
+        title: "Write the plan",
+        description: null,
+      });
+    });
+
+    it("never publishes the Owner on the created Task", async () => {
+      const { app } = harness();
+
+      const response = await request(app).post("/api/tasks").send(draft);
+
+      expect(response.body).not.toHaveProperty("ownerId");
+    });
+
+    it("keeps the new Task out of another Owner's list", async () => {
+      // One store, two Actors: the Task has to be invisible to the second
+      // because of who owns it, not because it is somewhere else entirely.
+      const store = createMemoryTaskRepository();
+      const { app } = harness({ taskRepository: store });
+      const { app: theirApp } = harness({
+        taskRepository: store,
+        requireAuth: authenticateAs(OTHER_USER_ID),
+      });
+
+      await request(app).post("/api/tasks").send(draft);
+      const theirs = await request(theirApp).get("/api/tasks");
+
+      expect(theirs.body.items).toEqual([]);
+      expect(theirs.body.total).toBe(0);
+    });
+  });
+
+  describe("the title", () => {
+    it("trims it", async () => {
+      const { app } = harness();
+
+      const response = await request(app)
+        .post("/api/tasks")
+        .send({ title: "  Write the plan  " });
+
+      expect(response.body.title).toBe("Write the plan");
+    });
+
+    it("rejects a missing title", async () => {
+      const { app } = harness();
+
+      const response = await request(app).post("/api/tasks").send({});
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("rejects a title that is only whitespace", async () => {
+      const { app } = harness();
+
+      const response = await request(app).post("/api/tasks").send({ title: "   " });
+
+      expect(response.status).toBe(422);
+    });
+
+    it("rejects a title beyond the cap", async () => {
+      const { app } = harness();
+
+      const response = await request(app)
+        .post("/api/tasks")
+        .send({ title: "a".repeat(201) });
+
+      expect(response.status).toBe(422);
+    });
+
+    it("names the offending field in the details", async () => {
+      const { app } = harness();
+
+      const response = await request(app).post("/api/tasks").send({ title: "" });
+
+      // The create form reads these issues to mark the field that failed, so
+      // the paths travelling intact is the contract, not an implementation
+      // detail of the error envelope.
+      expect(response.body.error.details).toEqual([
+        expect.objectContaining({ path: ["title"] }),
+      ]);
+    });
+  });
+
+  describe("the description", () => {
+    it("stores one when given", async () => {
+      const { app } = harness();
+
+      const response = await request(app)
+        .post("/api/tasks")
+        .send({ ...draft, description: "  the details  " });
+
+      expect(response.body.description).toBe("the details");
+    });
+
+    it("stores an omitted description as absent, not as text", async () => {
+      const { app } = harness();
+
+      const response = await request(app).post("/api/tasks").send(draft);
+
+      // Null, never the four-letter string an unchecked template produces.
+      expect(response.body.description).toBeNull();
+    });
+
+    it("stores a blank description as absent", async () => {
+      const { app } = harness();
+
+      const response = await request(app)
+        .post("/api/tasks")
+        .send({ ...draft, description: "   " });
+
+      expect(response.body.description).toBeNull();
+    });
+
+    it("rejects a description beyond the cap", async () => {
+      const { app } = harness();
+
+      const response = await request(app)
+        .post("/api/tasks")
+        .send({ ...draft, description: "a".repeat(2001) });
+
+      expect(response.status).toBe(422);
+    });
+  });
+
+  describe("payloads it refuses", () => {
+    it("rejects an unknown field rather than dropping it", async () => {
+      const { app } = harness();
+
+      const response = await request(app)
+        .post("/api/tasks")
+        .send({ ...draft, titel: "a typo" });
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("rejects a body that is not an object", async () => {
+      const { app } = harness();
+
+      const response = await request(app)
+        .post("/api/tasks")
+        .set("Content-Type", "application/json")
+        .send('["a task"]');
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("rejects a body the parser could not read", async () => {
+      const { app } = harness();
+
+      const response = await request(app)
+        .post("/api/tasks")
+        .set("Content-Type", "application/json")
+        .send("{ not json");
+
+      // `express.json` throws before any schema is reached. Reported as 422
+      // rather than the parser's own 400, so PLAN.md §6's error table stays the
+      // whole vocabulary.
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("never reaches the repository with a payload it refused", async () => {
+      const create = jest.fn(async () => asWireTask(aTask()));
+      const { app } = harness({ taskRepository: { create } });
+
+      await request(app).post("/api/tasks").send({ title: "" });
+
+      expect(create).not.toHaveBeenCalled();
+    });
   });
 });

@@ -11,10 +11,9 @@ interface Statement {
 
 /**
  * One `tasks` row as `node-postgres` hands it back under Drizzle's
- * `rowMode: "array"` — positional, in the column order `db/schema.ts` declares,
- * with the window function's count last.
+ * `rowMode: "array"` — positional, in the column order `db/schema.ts` declares.
  */
-function aRowArray(total: number): unknown[] {
+function aTaskRow(): unknown[] {
   return [
     "11111111-1111-4111-8111-111111111111",
     "auth0|owner",
@@ -25,8 +24,12 @@ function aRowArray(total: number): unknown[] {
     new Date("2026-01-01T00:00:00.000Z"),
     new Date("2026-01-01T00:00:00.000Z"),
     null,
-    total,
   ];
+}
+
+/** The same row as a list query sees it, with the window function's count last. */
+function aListRow(total: number): unknown[] {
+  return [...aTaskRow(), total];
 }
 
 /**
@@ -86,7 +89,7 @@ describe("createDrizzleTaskRepository", () => {
     });
 
     it("reads the page and its total in one round trip", async () => {
-      const { repository, statements } = recordingRepository([aRowArray(3)]);
+      const { repository, statements } = recordingRepository([aListRow(3)]);
 
       const result = await repository.list({
         userId: "auth0|owner",
@@ -100,7 +103,7 @@ describe("createDrizzleTaskRepository", () => {
     });
 
     it("offsets by whole pages", async () => {
-      const { repository, statements } = recordingRepository([aRowArray(99)]);
+      const { repository, statements } = recordingRepository([aListRow(99)]);
 
       await repository.list({ userId: "auth0|owner", page: 3, pageSize: 25 });
 
@@ -109,7 +112,7 @@ describe("createDrizzleTaskRepository", () => {
     });
 
     it("adds no Status predicate when none was asked for", async () => {
-      const { repository, statements } = recordingRepository([aRowArray(1)]);
+      const { repository, statements } = recordingRepository([aListRow(1)]);
 
       await repository.list({ userId: "auth0|owner", page: 1, pageSize: 10 });
 
@@ -118,7 +121,7 @@ describe("createDrizzleTaskRepository", () => {
     });
 
     it("adds one when it was", async () => {
-      const { repository, statements } = recordingRepository([aRowArray(1)]);
+      const { repository, statements } = recordingRepository([aListRow(1)]);
 
       await repository.list({
         userId: "auth0|owner",
@@ -194,7 +197,7 @@ describe("createDrizzleTaskRepository", () => {
     });
 
     it("maps a matched row onto the wire shape", async () => {
-      const { repository } = recordingRepository([aRowArray(1)]);
+      const { repository } = recordingRepository([aTaskRow()]);
 
       const task = await repository.findById({
         userId: "auth0|owner",
@@ -211,6 +214,69 @@ describe("createDrizzleTaskRepository", () => {
         updatedAt: "2026-01-01T00:00:00.000Z",
         completedAt: null,
       });
+    });
+  });
+
+  describe("create", () => {
+    const draft = {
+      userId: "auth0|owner",
+      title: "A Task",
+      description: null,
+    };
+
+    it("inserts under the Actor, with the values bound", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.create(draft);
+
+      const [inserted] = statements;
+      expect(normalise(inserted.text)).toContain('insert into "tasks"');
+      expect(inserted.values).toEqual(["auth0|owner", "A Task", null]);
+    });
+
+    it("leaves the starting Status to the column default", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.create(draft);
+
+      // Only the Owner, the title and the description are bound; every other
+      // column is `default`, Status and Version included. Naming either here
+      // would be a second place the lifecycle starts, and the one in the
+      // database is the one that holds for writes that do not come from here.
+      expect(normalise(statements[0].text)).toContain(
+        "values (default, $1, $2, $3, default, default, default, default, default)",
+      );
+      expect(statements[0].values).toHaveLength(3);
+    });
+
+    it("returns the stored Task in one round trip", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      const created = await repository.create(draft);
+
+      // `returning` rather than an insert followed by a read: the id and the
+      // timestamps are the database's, and a second statement could observe a
+      // row someone else had already changed.
+      expect(statements).toHaveLength(1);
+      expect(normalise(statements[0].text)).toContain("returning");
+      expect(created).toEqual({
+        id: "11111111-1111-4111-8111-111111111111",
+        title: "A Task",
+        description: null,
+        status: "PENDING",
+        version: 1,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        completedAt: null,
+      });
+    });
+
+    it("fails loudly if the insert returned nothing", async () => {
+      const { repository } = recordingRepository([]);
+
+      // Not reachable through Postgres, and not worth handing every caller a
+      // `Task | undefined` to answer for.
+      await expect(repository.create(draft)).rejects.toThrow();
     });
   });
 });
