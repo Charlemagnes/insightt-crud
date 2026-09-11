@@ -1,6 +1,7 @@
 import { loadEnv } from "@/env";
 
 const COMPLETE = {
+  DATABASE_URL: "postgresql://postgres:secret@pooler.example:5432/postgres",
   AUTH0_DOMAIN: "example.eu.auth0.com",
   AUTH0_AUDIENCE: "https://tasks.example/api",
   PORT: "4000",
@@ -22,7 +23,27 @@ describe("loadEnv", () => {
   });
 
   it("names every missing variable in one throw", () => {
-    expect(() => loadEnv({})).toThrow(/AUTH0_DOMAIN[\s\S]*AUTH0_AUDIENCE/);
+    expect(() => loadEnv({})).toThrow(
+      /DATABASE_URL[\s\S]*AUTH0_DOMAIN[\s\S]*AUTH0_AUDIENCE/,
+    );
+  });
+
+  it("rejects the transaction-mode pooler by its port", () => {
+    // It fails late otherwise: the pool connects, early queries work, and a
+    // prepared statement then errors somewhere that looks like a Drizzle bug.
+    expect(() =>
+      loadEnv({
+        ...COMPLETE,
+        DATABASE_URL:
+          "postgresql://postgres.ref:secret@pooler.example:6543/postgres",
+      }),
+    ).toThrow(/session pooler/);
+  });
+
+  it("leaves the CA certificate path unset when none was given", () => {
+    // Absent means encrypted but unverified, which `db/client.ts` decides —
+    // `loadEnv` only reports what the environment said.
+    expect(loadEnv(COMPLETE).databaseCaCertPath).toBeUndefined();
   });
 
   it("rejects a WEB_ORIGIN that is not a URL", () => {

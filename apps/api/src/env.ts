@@ -5,11 +5,28 @@ import { z } from "zod";
  * the composition root and passed down as a value. Nothing below `index.ts`
  * reads `process.env`, so every collaborator can be built with a literal in a
  * test.
- *
- * Only variables the API actually uses are declared. `DATABASE_URL` joins them
- * when the Postgres-backed repository lands.
  */
 const EnvSchema = z.object({
+  // A Supavisor **session-mode** connection string, not the direct host:
+  // transaction mode does not support prepared statements, and the direct host
+  // is IPv6-first (PLAN.md §4).
+  //
+  // The port is checked rather than described, because transaction mode fails
+  // late and obscurely — the pool connects, the first few queries work, and
+  // then a prepared statement errors somewhere that looks like a Drizzle bug.
+  DATABASE_URL: z
+    .string()
+    .min(1, "DATABASE_URL is required")
+    .refine((url) => !url.includes(":6543/"), {
+      error:
+        "DATABASE_URL is the transaction-mode pooler (:6543), which does not " +
+        "support prepared statements. Use the session pooler on :5432.",
+    }),
+  /**
+   * Supabase's CA certificate. Absent, the connection is encrypted but its
+   * certificate is not verified — see `db/client.ts`.
+   */
+  DATABASE_CA_CERT: z.string().min(1).optional(),
   AUTH0_DOMAIN: z.string().min(1, "AUTH0_DOMAIN is required"),
   AUTH0_AUDIENCE: z.string().min(1, "AUTH0_AUDIENCE is required"),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -22,6 +39,10 @@ const EnvSchema = z.object({
 });
 
 export interface Env {
+  /** Supabase Postgres over the pooler in session mode. */
+  databaseUrl: string;
+  /** Where Supabase's CA lives, when TLS verification is turned on. */
+  databaseCaCertPath?: string;
   /** Where the tenant's JWKS is discovered. Auth0 issuers carry a trailing slash. */
   auth0IssuerBaseUrl: string;
   /** The API identifier registered in Auth0; every access token must name it. */
@@ -45,9 +66,18 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error(`Invalid API environment:\n${problems}`);
   }
 
-  const { AUTH0_DOMAIN, AUTH0_AUDIENCE, PORT, WEB_ORIGIN } = parsed.data;
+  const {
+    DATABASE_URL,
+    DATABASE_CA_CERT,
+    AUTH0_DOMAIN,
+    AUTH0_AUDIENCE,
+    PORT,
+    WEB_ORIGIN,
+  } = parsed.data;
 
   return {
+    databaseUrl: DATABASE_URL,
+    databaseCaCertPath: DATABASE_CA_CERT,
     auth0IssuerBaseUrl: `https://${AUTH0_DOMAIN.replace(/\/+$/, "")}/`,
     auth0Audience: AUTH0_AUDIENCE,
     port: PORT,

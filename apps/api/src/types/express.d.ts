@@ -11,6 +11,13 @@ declare global {
       requestId?: string;
       /** Set by `attachActor`, once auth has resolved. Read with `actorOf`. */
       actor?: Actor;
+      /**
+       * What `validate` parsed out of the request. Typed as `unknown` because
+       * one interface cannot describe every route's schemas at once — read it
+       * through the `.read(req)` that came back with the middleware, which
+       * knows which schemas were actually mounted.
+       */
+      valid?: unknown;
     }
 
     interface Locals {

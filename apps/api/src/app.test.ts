@@ -1,63 +1,19 @@
-import type { RequestHandler } from "express";
-import { UnauthorizedError } from "express-oauth2-jwt-bearer";
 import request from "supertest";
 
-import { createApp } from "@/app";
-import type { LogRecord } from "@/middleware/logging";
-import type { TaskRepository } from "@/tasks/repository";
-
-const WEB_ORIGIN = "http://localhost:3000";
-const TEST_USER_ID = "auth0|test-actor";
-
-/** Stands in for `express-oauth2-jwt-bearer` on the happy path. */
-function authenticateAs(userId: string): RequestHandler {
-  return (req, _res, next) => {
-    req.auth = {
-      header: { alg: "RS256" },
-      payload: { sub: userId },
-      token: "test-token",
-    };
-    next();
-  };
-}
-
-/** Stands in for it on the rejection path: the real middleware throws this. */
-const rejectEveryone: RequestHandler = (_req, _res, next) => {
-  next(new UnauthorizedError("Missing bearer token"));
-};
+import {
+  harness,
+  rejectEveryone,
+  TEST_USER_ID,
+  WEB_ORIGIN,
+} from "@/testing/harness";
 
 /**
  * The app factory is the seam every later test depends on, so these exercise it
  * the way the composition root does — the real middleware stack, fake
  * collaborators — rather than reaching past it.
+ *
+ * What the Task routes themselves do with a request lives in `tasks/routes.test.ts`.
  */
-function harness(
-  overrides: {
-    requireAuth?: RequestHandler;
-    taskRepository?: Partial<TaskRepository>;
-  } = {},
-) {
-  const records: LogRecord[] = [];
-
-  const taskRepository: TaskRepository = {
-    list: jest.fn(async () => ({ items: [], total: 0 })),
-    ...overrides.taskRepository,
-  };
-
-  const app = createApp({
-    taskRepository,
-    requireAuth: overrides.requireAuth ?? authenticateAs(TEST_USER_ID),
-    webOrigin: WEB_ORIGIN,
-    log: (record) => records.push(record),
-  });
-
-  return { app, records, taskRepository };
-}
-
-function lines(records: LogRecord[], direction: LogRecord["direction"]) {
-  return records.filter((record) => record.direction === direction);
-}
-
 describe("createApp", () => {
   describe("authentication", () => {
     it("rejects an unauthenticated request with UNAUTHENTICATED", async () => {
@@ -72,47 +28,36 @@ describe("createApp", () => {
     });
 
     it("rejects before any handler runs", async () => {
-      const { app, taskRepository } = harness({ requireAuth: rejectEveryone });
+      const list = jest.fn(async () => ({ items: [], total: 0 }));
+      const { app } = harness({
+        requireAuth: rejectEveryone,
+        taskRepository: { list },
+      });
 
       await request(app).get("/api/tasks");
 
-      expect(taskRepository.list).not.toHaveBeenCalled();
+      expect(list).not.toHaveBeenCalled();
     });
 
     it("scopes the list to the Actor read from the token", async () => {
-      const { app, taskRepository } = harness();
+      const list = jest.fn(async () => ({ items: [], total: 0 }));
+      const { app } = harness({ taskRepository: { list } });
 
       await request(app).get("/api/tasks");
 
-      expect(taskRepository.list).toHaveBeenCalledWith(
+      expect(list).toHaveBeenCalledWith(
         expect.objectContaining({ userId: TEST_USER_ID }),
       );
     });
   });
 
-  describe("GET /api/tasks", () => {
-    it("returns a well-formed empty page envelope", async () => {
-      const { app } = harness();
-
-      const response = await request(app).get("/api/tasks");
-
-      expect(response.status).toBe(200);
-      expect(response.body).toEqual({
-        items: [],
-        page: 1,
-        pageSize: 10,
-        total: 0,
-      });
-    });
-  });
-
   describe("logging", () => {
     it("logs a rejected request too, with the User ID absent", async () => {
-      const { app, records } = harness({ requireAuth: rejectEveryone });
+      const { app, lines } = harness({ requireAuth: rejectEveryone });
 
       await request(app).get("/api/tasks");
 
-      const [inbound] = lines(records, "inbound");
+      const [inbound] = lines("inbound");
       expect(inbound).toMatchObject({
         userId: null,
         method: "GET",
@@ -123,32 +68,31 @@ describe("createApp", () => {
       expect(inbound).toHaveProperty("params");
       expect(inbound).toHaveProperty("query");
       expect(inbound).toHaveProperty("headers");
-      expect(lines(records, "actor")).toHaveLength(0);
+      expect(lines("actor")).toHaveLength(0);
     });
 
     it("carries the query parameters on the inbound line", async () => {
-      const { app, records } = harness();
+      const { app, lines } = harness();
 
       await request(app).get("/api/tasks?page=2&pageSize=5");
 
-      const [inbound] = lines(records, "inbound");
-      expect(inbound.query).toEqual({ page: "2", pageSize: "5" });
+      expect(lines("inbound")[0].query).toEqual({ page: "2", pageSize: "5" });
     });
 
     it("logs a CORS preflight, which never reaches a route", async () => {
-      const { app, records } = harness();
+      const { app, lines } = harness();
 
       await request(app)
         .options("/api/tasks")
         .set("Origin", WEB_ORIGIN)
         .set("Access-Control-Request-Method", "PATCH");
 
-      expect(lines(records, "inbound")).toHaveLength(1);
-      expect(lines(records, "outbound")[0]).toMatchObject({ status: 204 });
+      expect(lines("inbound")).toHaveLength(1);
+      expect(lines("outbound")[0]).toMatchObject({ status: 204 });
     });
 
     it("logs a body the parser refused, which never reaches a route either", async () => {
-      const { app, records } = harness();
+      const { app, lines } = harness();
 
       const response = await request(app)
         .post("/api/tasks")
@@ -157,62 +101,57 @@ describe("createApp", () => {
 
       expect(response.status).toBe(422);
       expect(response.body.error.code).toBe("VALIDATION_FAILED");
-      expect(lines(records, "inbound")).toHaveLength(1);
-      expect(lines(records, "outbound")[0]).toMatchObject({ status: 422 });
+      expect(lines("inbound")).toHaveLength(1);
+      expect(lines("outbound")[0]).toMatchObject({ status: 422 });
     });
 
     it("attaches the Actor's User ID to the same request id", async () => {
-      const { app, records } = harness();
+      const { app, lines } = harness();
 
       await request(app).get("/api/tasks");
 
-      const [inbound] = lines(records, "inbound");
-      const [actor] = lines(records, "actor");
-      expect(actor).toMatchObject({
-        requestId: inbound.requestId,
+      expect(lines("actor")[0]).toMatchObject({
+        requestId: lines("inbound")[0].requestId,
         userId: TEST_USER_ID,
       });
     });
 
     it("logs an outbound line sharing the request id", async () => {
-      const { app, records } = harness();
+      const { app, lines } = harness();
 
       await request(app).get("/api/tasks");
 
-      const [inbound] = lines(records, "inbound");
-      const [outbound] = lines(records, "outbound");
+      const [outbound] = lines("outbound");
       expect(outbound).toMatchObject({
-        requestId: inbound.requestId,
+        requestId: lines("inbound")[0].requestId,
         status: 200,
       });
       expect(outbound.durationMs).toEqual(expect.any(Number));
     });
 
     it("redacts authorization, cookie and set-cookie headers", async () => {
-      const { app, records } = harness();
+      const { app, lines, records } = harness();
 
       await request(app)
         .get("/api/tasks")
         .set("Authorization", "Bearer super-secret")
         .set("Cookie", "session=super-secret");
 
-      const [inbound] = lines(records, "inbound");
-      const headers = inbound.headers as Record<string, unknown>;
+      const headers = lines("inbound")[0].headers as Record<string, unknown>;
       expect(headers.authorization).toBe("[REDACTED]");
       expect(headers.cookie).toBe("[REDACTED]");
       expect(JSON.stringify(records)).not.toContain("super-secret");
     });
 
     it("truncates a large body", async () => {
-      const { app, records } = harness();
+      const { app, lines } = harness();
 
       await request(app)
         .post("/api/tasks")
         .set("Content-Type", "application/json")
         .send({ title: "x".repeat(5000) });
 
-      const [inbound] = lines(records, "inbound");
-      expect(JSON.stringify(inbound.body).length).toBeLessThan(2000);
+      expect(JSON.stringify(lines("inbound")[0].body).length).toBeLessThan(2000);
     });
   });
 

@@ -5,14 +5,19 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "test": "jest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
     "@insightt/shared": "*",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
     "express-oauth2-jwt-bearer": "^1.10.0",
+    "pg": "^8.23.0",
     "zod": "^4.6.2"
   },
   "devDependencies": {
@@ -20,7 +25,9 @@
     "@types/express": "^5.0.6",
     "@types/jest": "^30",
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/supertest": "^7.2.1",
+    "drizzle-kit": "^0.31.10",
     "jest": "^30",
     "supertest": "^7.2.2",
     "ts-jest": "^29",

@@ -29,6 +29,7 @@ npm run build                  # production build (also the only full type-check
 npm run lint                   # fans out to each workspace; eslint flat config in apps/web
 npm run db:generate            # drizzle-kit — generate a migration from schema.ts
 npm run db:migrate             # apply migrations
+npm run db:seed -- '<user id>' # demo Tasks under one Owner; add 'replace' to clear theirs first
 npm run test                   # Jest: unit (apps/api, packages/shared) + integration (apps/web)
 npm run test:e2e               # Cypress
 npm run docs:api               # z.toJSONSchema() -> docs/openapi.json
@@ -39,6 +40,7 @@ npm run docs:api               # z.toJSONSchema() -> docs/openapi.json
 ```
 apps/web         Next.js 16 SPA — all pages are client components, one route: /
 apps/api         Express + TypeScript REST API (CommonJS)
+apps/api/drizzle SQL migrations — generated, plus hand-written `--custom` ones
 packages/shared  @insightt/shared — Zod schemas + the status transition rules
 docs/adr/        Architecture decision records
 scripts/         setup-auth0.sh
@@ -92,6 +94,12 @@ v16 APIs differ from older releases.
   internal to `apps/api`); Zod types describe the wire contract (camelCase, shared).
   `apps/api/src/tasks/mappers.ts` is the seam. Do not use `drizzle-zod` for the
   shared schemas.
+- **Nothing above `tasks/repository.ts` knows Drizzle exists.** The interface is
+  in that file; `repository.drizzle.ts` and `repository.memory.ts` implement it,
+  and only `index.ts` and the test harness name one.
+- **Triggers and functions are hand-written migrations.** `drizzle-kit` diffs
+  tables only, so `npm run db:generate -- --custom --name <what>` and write the
+  SQL. Never edit a generated migration to carry one.
 - **Not-owned tasks return `404`, never `403`**, so existence is not leaked.
 - **`412` means stale `If-Match`; `409` means an illegal transition.** They are
   different failures and the frontend branches on them.
