@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 
-import { ErrorCode, TaskStatus, TASK_PAGE } from "@insightt/shared";
+import {
+  ErrorCode,
+  TaskSortField,
+  TaskStatus,
+  TASK_PAGE,
+} from "@insightt/shared";
 
 import { OPENAPI_JSON_PATH } from "@/docs/generate";
 import {
@@ -101,12 +106,22 @@ describe("buildOpenApiDocument", () => {
   describe("the list operation", () => {
     const list = document.paths["/api/tasks"].get;
 
-    it("takes the pagination and filter parameters, in the query", () => {
+    it("takes the pagination, filter and sort parameters, in the query", () => {
       expect(parameterNames(list, "query")).toEqual([
         "page",
         "pageSize",
         "status",
+        "sort",
+        "direction",
       ]);
+    });
+
+    // Read off the schema rather than listed again here: a field added to the
+    // sort whitelist reaches the document without anyone remembering to say so.
+    it("takes the sortable fields from the schema that enforces them", () => {
+      expect(parameterNamed(list, "sort").schema).toMatchObject({
+        enum: TaskSortField.options,
+      });
     });
 
     it("takes the page size cap from the schema that enforces it", () => {

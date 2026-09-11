@@ -73,6 +73,30 @@ describe("listTasks", () => {
     expect(url.searchParams.get("pageSize")).toBe("50");
   });
 
+  it("names the sort and its direction as the query schema spells them", async () => {
+    const url = await urlFor({ sort: "title", direction: "desc" });
+
+    expect(url.searchParams.get("sort")).toBe("title");
+    expect(url.searchParams.get("direction")).toBe("desc");
+  });
+
+  // The unsorted list asks for no order rather than for a default one, so
+  // neither key is sent — the API's answer to no sort is the list's own.
+  it("omits both keys entirely when the list is unsorted", async () => {
+    const url = await urlFor();
+
+    expect(url.searchParams.has("sort")).toBe(false);
+    expect(url.searchParams.has("direction")).toBe(false);
+  });
+
+  // A direction on its own orders nothing, and the API ignores it. Sending one
+  // would spell an unsorted list as though an order had been asked for.
+  it("omits a direction that has no column to run in", async () => {
+    const url = await urlFor({ direction: "desc" });
+
+    expect(url.searchParams.has("direction")).toBe(false);
+  });
+
   it("sends the Status when the list is filtered", async () => {
     const url = await urlFor({ status: "ARCHIVED" });
 

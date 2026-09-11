@@ -180,6 +180,25 @@ export const TASK_PAGE = {
 } as const;
 
 /**
+ * The fields a list may be ordered by.
+ *
+ * A whitelist and not a free-text column name: the value reaches an `ORDER BY`,
+ * and "whatever the client sent" is the shape that lets a query string choose
+ * what the database sorts on. These three are the columns the table shows.
+ *
+ * `status` orders by the lifecycle rather than by the alphabet — Postgres sorts
+ * an enum by the order its values were declared, which `schema.test.ts` already
+ * holds to `LIFECYCLE`. A Pending Task therefore sorts before an Archived one,
+ * which is the order the column means.
+ */
+export const TaskSortField = z.enum(["title", "status", "createdAt"]);
+export type TaskSortField = z.infer<typeof TaskSortField>;
+
+/** Which way a sorted column runs. */
+export const SortDirection = z.enum(["asc", "desc"]);
+export type SortDirection = z.infer<typeof SortDirection>;
+
+/**
  * The `GET /api/tasks` query string. `z.coerce` because a query string arrives
  * as text — `?page=2` is `"2"` until something says otherwise.
  *
@@ -188,6 +207,12 @@ export const TASK_PAGE = {
  * an Archived Task is finished and put away (CONTEXT.md, "Archived"). It is
  * still a Status and not a soft delete — `?status=ARCHIVED` asks for those
  * Tasks by name, and is the only thing that shows them.
+ *
+ * `sort` has no default either, and no sort is a real answer rather than a
+ * missing one: the list is **unsorted**, and no column claims it. Storage still
+ * returns those rows in a stable order, because paging over one that is not
+ * total shows the same Task on two pages — but that order is not a sort the
+ * client asked for, and nothing above the repository names it.
  */
 export const TaskListQuery = z.object({
   page: z.coerce.number().int().min(TASK_PAGE.first).default(TASK_PAGE.first),
@@ -198,6 +223,12 @@ export const TaskListQuery = z.object({
     .max(TASK_PAGE.maxSize)
     .default(TASK_PAGE.defaultSize),
   status: TaskStatus.optional(),
+  sort: TaskSortField.optional(),
+  // Meaningful only alongside `sort`, and ignored without it — there is no
+  // direction to run in when no column was named. Optional rather than
+  // defaulted for the same reason `sort` is: a defaulted direction would read
+  // as an order having been asked for on an unsorted list.
+  direction: SortDirection.optional(),
 });
 export type TaskListQuery = z.infer<typeof TaskListQuery>;
 

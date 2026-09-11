@@ -47,16 +47,29 @@ export type TaskListParams = Omit<TaskListQuery, "status"> & {
   status: StatusFilter;
 };
 
-/** One page of the Actor's own Tasks, newest first. */
+/**
+ * One page of the Actor's own Tasks, in the order the params ask for — or in no
+ * order at all, which is what the list starts in.
+ */
 export function listTasks({
   page,
   pageSize,
   status,
+  sort,
+  direction,
 }: TaskListParams): Promise<TaskPage> {
   const query = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
   });
+
+  // Both keys or neither. A direction alone orders nothing — the API ignores
+  // it — and sending one would put an unsorted list under a query string that
+  // reads as though an order had been asked for.
+  if (sort && direction) {
+    query.set("sort", sort);
+    query.set("direction", direction);
+  }
 
   // `ALL` is dropped rather than sent: it is not a Status the enum has, so the
   // API would refuse it as `422`, and no key at all is the unfiltered list it

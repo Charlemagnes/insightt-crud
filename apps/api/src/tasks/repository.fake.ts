@@ -16,7 +16,14 @@
  * on interactions, and it would read as the Jest convention, which this is not.
  */
 
-import { canTransition, type Task, type TaskStatus } from "@insightt/shared";
+import {
+  canTransition,
+  LIFECYCLE,
+  type SortDirection,
+  type Task,
+  type TaskSortField,
+  type TaskStatus,
+} from "@insightt/shared";
 
 import { randomUUID } from "node:crypto";
 
@@ -76,6 +83,8 @@ export function createFakeTaskRepository(
       page,
       pageSize,
       status,
+      sort,
+      direction,
     }: OwnerScopedListQuery): Promise<TaskListResult> {
       const owned = tasks
         .filter((task) => task.ownerId === userId)
@@ -87,13 +96,10 @@ export function createFakeTaskRepository(
             ? task.status !== SHOWN_ONLY_WHEN_ASKED_FOR
             : task.status === status,
         )
-        // Newest first, with `id` breaking a tie exactly as the SQL does. A
-        // fake that ordered differently would let a paging bug pass here and
-        // fail in production.
-        .sort(
-          (a, b) =>
-            b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
-        );
+        // The same order the SQL applies, tiebreaker included. A fake that
+        // ordered differently would let a paging bug pass here and fail in
+        // production.
+        .sort(comparing(sort, direction));
 
       const from = (page - 1) * pageSize;
 
@@ -251,4 +257,33 @@ function owned(
   { userId, id }: OwnerScopedTaskQuery,
 ): OwnedTask | undefined {
   return tasks.find((task) => task.id === id && task.ownerId === userId);
+}
+
+/**
+ * The comparator for one sort, standing in for the SQL `ORDER BY` — and for no
+ * sort at all, which is creation order with `id` making it total, exactly as
+ * `UNSORTED` spells it in the Drizzle repository.
+ *
+ * `status` compares lifecycle positions rather than the strings themselves,
+ * because that is what Postgres does with an enum column: it orders by the
+ * order the values were declared, and `LIFECYCLE` is that order. Comparing the
+ * text would put `ARCHIVED` first and make the fake disagree with the database
+ * about what a sorted Status column looks like.
+ *
+ * `id` breaks a tie, running the same way as the column before it, so the fake
+ * pages exactly as stably as the SQL does — PLAN.md §6.
+ */
+function comparing(
+  sort?: TaskSortField,
+  direction?: SortDirection,
+): (a: OwnedTask, b: OwnedTask) => number {
+  const column: TaskSortField = sort ?? "createdAt";
+  const sign = sort && direction === "desc" ? -1 : 1;
+
+  const compare = (a: OwnedTask, b: OwnedTask): number =>
+    column === "status"
+      ? LIFECYCLE.indexOf(a.status) - LIFECYCLE.indexOf(b.status)
+      : a[column].localeCompare(b[column]);
+
+  return (a, b) => sign * (compare(a, b) || a.id.localeCompare(b.id));
 }

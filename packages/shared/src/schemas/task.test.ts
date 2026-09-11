@@ -1,10 +1,12 @@
 import {
   CreateTaskInput,
+  SortDirection,
   TASK_LIMITS,
   TASK_PAGE,
   TaskListQuery,
   TaskPageSchema,
   TaskSchema,
+  TaskSortField,
   UpdateTaskInput,
 } from "./task";
 
@@ -269,6 +271,15 @@ describe("TaskListQuery", () => {
       });
     });
 
+    // Like `status`, and for the same reason: a default here would be an order
+    // the client never asked for, shown under a column claiming it did.
+    it("has no sort default, so an unasked-for list is unsorted", () => {
+      const parsed = TaskListQuery.parse({});
+
+      expect(parsed).not.toHaveProperty("sort");
+      expect(parsed).not.toHaveProperty("direction");
+    });
+
     it("leaves the Status unset, so the list shows every Status", () => {
       expect(TaskListQuery.parse({}).status).toBeUndefined();
     });
@@ -280,7 +291,7 @@ describe("TaskListQuery", () => {
 
   describe("coercion", () => {
     it("reads the numbers a query string spells as text", () => {
-      expect(TaskListQuery.parse({ page: "3", pageSize: "25" })).toEqual({
+      expect(TaskListQuery.parse({ page: "3", pageSize: "25" })).toMatchObject({
         page: 3,
         pageSize: 25,
       });
@@ -292,6 +303,30 @@ describe("TaskListQuery", () => {
 
     it("rejects a fractional page", () => {
       expect(TaskListQuery.safeParse({ page: "1.5" }).success).toBe(false);
+    });
+  });
+
+  describe("sorting", () => {
+    it("takes a sort field the contract names", () => {
+      expect(TaskListQuery.parse({ sort: "title" }).sort).toBe("title");
+    });
+
+    it("takes a direction alongside it", () => {
+      const parsed = TaskListQuery.parse({ sort: "title", direction: "desc" });
+
+      expect(parsed).toMatchObject({ sort: "title", direction: "desc" });
+      expect(SortDirection.options).toContain(parsed.direction);
+      expect(TaskSortField.options).toContain(parsed.sort);
+    });
+
+    // The value reaches an `ORDER BY`. A field the whitelist does not name is a
+    // `422` rather than a column the query string got to choose.
+    it("refuses a field that is not one of them", () => {
+      expect(TaskListQuery.safeParse({ sort: "ownerId" }).success).toBe(false);
+    });
+
+    it("refuses a direction that is not one of the two", () => {
+      expect(TaskListQuery.safeParse({ direction: "up" }).success).toBe(false);
     });
   });
 

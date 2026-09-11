@@ -1,5 +1,11 @@
-import { statusBefore, TaskStatus, type Task } from "@insightt/shared";
-import { and, count, desc, eq, ne, sql, type SQL } from "drizzle-orm";
+import {
+  statusBefore,
+  TaskStatus,
+  type SortDirection,
+  type Task,
+  type TaskSortField,
+} from "@insightt/shared";
+import { and, asc, count, desc, eq, ne, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Database } from "@/db/client";
@@ -31,6 +37,52 @@ import {
 const STARTS_FROM = requireStatusBefore("IN_PROGRESS");
 const ARCHIVES_FROM = requireStatusBefore("ARCHIVED");
 
+/**
+ * The column each sortable field names. A lookup and not string interpolation:
+ * the field arrives from a query string, and this is what keeps it a choice
+ * between three columns rather than a value spliced into an `ORDER BY`.
+ *
+ * `status` is the Postgres enum, which orders by the order its values were
+ * declared — the lifecycle, held to that order by `schema.test.ts`. Sorting on
+ * it therefore runs Pending to Archived rather than alphabetically.
+ */
+const SORTABLE_COLUMNS = {
+  title: tasks.title,
+  status: tasks.status,
+  createdAt: tasks.createdAt,
+} as const satisfies Record<TaskSortField, unknown>;
+
+/**
+ * The order an unsorted list comes back in.
+ *
+ * Postgres has no inherent row order, and paging over one that is not total
+ * shows the same Task on two pages while another appears on none (PLAN.md §6)
+ * — so "no sort" still has to be *some* `ORDER BY`. Creation order is the one
+ * an unsorted list of work reads as; `id` makes it total.
+ *
+ * It is not a sort, and nothing above this file calls it one: no column claims
+ * it, and the API reports the `sort` it was given, which is nothing.
+ */
+const UNSORTED = [asc(tasks.createdAt), asc(tasks.id)];
+
+/**
+ * The `ORDER BY` for one sort, with `id` breaking a tie.
+ *
+ * The tiebreaker runs the same way as the column it follows, and it is not
+ * optional: `title` and `status` both have far more ties than `created_at`
+ * does, and without a total order the paging above comes apart.
+ *
+ * `direction` without a `sort` orders nothing — there is no column to run in a
+ * direction — so the unsorted order is what that asks for.
+ */
+function orderFor(sort?: TaskSortField, direction?: SortDirection) {
+  if (!sort) return UNSORTED;
+
+  const way = direction === "desc" ? desc : asc;
+
+  return [way(SORTABLE_COLUMNS[sort]), way(tasks.id)];
+}
+
 function requireStatusBefore(to: TaskStatus): TaskStatus {
   const from = statusBefore(to);
 
@@ -55,6 +107,8 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
       page,
       pageSize,
       status,
+      sort,
+      direction,
     }: OwnerScopedListQuery): Promise<TaskListResult> {
       // No `status` is still a predicate, not the absence of one: it means
       // every Status except Archived, which a list shows only when asked for it
@@ -77,8 +131,7 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
         })
         .from(tasks)
         .where(owned)
-        // `id` breaks the tie, without which paging is not stable — PLAN.md §6.
-        .orderBy(desc(tasks.createdAt), desc(tasks.id))
+        .orderBy(...orderFor(sort, direction))
         .limit(pageSize)
         .offset((page - 1) * pageSize);
 

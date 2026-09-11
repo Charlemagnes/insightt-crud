@@ -17,7 +17,14 @@
  * the Task list does not use. The header signed in for real is the Cypress
  * spec's job (PLAN.md §15, test 3).
  */
-import { TASK_PAGE, type Task, type TaskPage } from "@insightt/shared";
+import {
+  LIFECYCLE,
+  SortDirection,
+  TASK_PAGE,
+  TaskSortField,
+  type Task,
+  type TaskPage,
+} from "@insightt/shared";
 import { render, type RenderResult } from "@testing-library/react";
 import { http, HttpResponse, type RequestHandler } from "msw";
 
@@ -42,11 +49,15 @@ const SESSION = {
   login: () => Promise.resolve(),
 };
 
-/** The view state a freshly loaded screen starts in: page one, no filter, no form. */
+/**
+ * The view state a freshly loaded screen starts in: page one, no filter, no
+ * sort, no form.
+ */
 const FRESH_VIEW = {
   page: TASK_PAGE.first,
   pageSize: TASK_PAGE.defaultSize,
   status: ALL_STATUSES,
+  sort: null,
   formTarget: null,
 };
 
@@ -60,8 +71,8 @@ let sequence = 0;
  * The id is a real UUID because `TaskSchema` parses one — a readable
  * `"task-1"` would fail at the client boundary rather than in the assertion,
  * which is a confusing way to learn that a fixture is wrong. `createdAt` walks
- * forward one second per call, so declaration order is also oldest-first and
- * the newest-first list below has something to order by.
+ * forward one second per call, so declaration order is oldest-first and the
+ * sorted list below has something to order by.
  */
 export function aTask(overrides: Partial<Task> = {}): Task {
   sequence += 1;
@@ -184,12 +195,28 @@ export function fakeTaskApi(): FakeTaskApi {
         const matching = tasks.filter((task) =>
           status === null ? task.status !== "ARCHIVED" : task.status === status,
         );
-        // Newest first, which is the ordering the real endpoint is fixed at
-        // (PLAN.md §6). A fake that paged in insertion order would let an
-        // ordering assertion pass against the wrong list.
-        const ordered = [...matching].sort((a, b) =>
-          b.createdAt.localeCompare(a.createdAt),
-        );
+        // The order the query asked for, parsed rather than trusted: a sort
+        // field the contract does not name is a `422` from the real endpoint,
+        // and a fake that quietly accepted one would hide the bug that sent
+        // it. Asking for none is the unsorted list, which the repository
+        // returns in creation order — not a sort, but the stable order paging
+        // needs. A fake that paged in insertion order would let an ordering
+        // assertion pass against the wrong list.
+        const asked = query.get("sort");
+        const sort = asked === null ? "createdAt" : TaskSortField.parse(asked);
+        const direction = SortDirection.parse(query.get("direction") ?? "asc");
+        const sign = asked !== null && direction === "desc" ? -1 : 1;
+
+        // `status` by the lifecycle, as the Postgres enum orders it, and `id`
+        // breaking every tie — the same total order the SQL applies.
+        const ordered = [...matching].sort((a, b) => {
+          const by =
+            sort === "status"
+              ? LIFECYCLE.indexOf(a.status) - LIFECYCLE.indexOf(b.status)
+              : a[sort].localeCompare(b[sort]);
+
+          return sign * (by || a.id.localeCompare(b.id));
+        });
         const from = (page - 1) * pageSize;
 
         const body: TaskPage = {

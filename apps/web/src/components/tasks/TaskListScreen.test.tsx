@@ -1,8 +1,9 @@
-import type { TaskStatus } from "@insightt/shared";
+import { TASK_PAGE, type TaskStatus } from "@insightt/shared";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { setupServer } from "msw/node";
 
+import { useTaskListStore } from "@/stores/taskList";
 import { aTask, fakeTaskApi, renderTaskList } from "@/testing/harness";
 
 /**
@@ -37,9 +38,33 @@ function rowFor(title: string): HTMLElement {
   return screen.getByRole("row", { name: (name) => name.includes(title) });
 }
 
+/**
+ * Every row's title, top to bottom — the list's order as the person sees it.
+ * The first cell of each row, so a title that also appears in a description or
+ * a form field behind the table cannot join the list.
+ */
+function titlesInOrder(): string[] {
+  return screen
+    .getAllByRole("row")
+    .slice(1) // the header row, which has no Task
+    .map((row) => within(row).getAllByRole("cell")[1]?.textContent ?? "");
+}
+
 /** A control inside one row, so two rows' Start buttons are never confused. */
 function buttonIn(title: string, label: string): HTMLElement {
   return within(rowFor(title)).getByRole("button", { name: label });
+}
+
+/**
+ * A field of the open form, looked up inside the dialog rather than across the
+ * page. The scope is not incidental: a sortable column header carries an
+ * `aria-label` of the column's name, so "Title" on the page as a whole is two
+ * elements — the header and the field — and an unscoped query finds both.
+ */
+function formField(label: string): Promise<HTMLElement> {
+  return screen
+    .findByRole("dialog")
+    .then((dialog) => within(dialog).findByLabelText(label));
 }
 
 /**
@@ -76,6 +101,126 @@ describe("the task list", () => {
     expect(
       within(rowFor("Bank the result")).getByText("Done"),
     ).toBeInTheDocument();
+  });
+
+  /**
+   * Sorting is the server's, so what is checked here is the whole round trip:
+   * the header click reaches the store, the store reaches the query key, and
+   * the rows that come back are in the order the header now claims.
+   *
+   * The titles are read off the rendered rows rather than asserted one at a
+   * time, because the order *is* the assertion — a test that only checked the
+   * first row would pass on a list that reversed everything after it.
+   */
+  it("reorders the list from the server when a column header is clicked", async () => {
+    api.reset([
+      aTask({ title: "Bank the result" }),
+      aTask({ title: "Alphabetise the shelf" }),
+      aTask({ title: "Correct the record" }),
+    ]);
+
+    renderTaskList();
+    await screen.findByText("Bank the result");
+
+    // Unsorted, which is where the list starts: no column claims it, and the
+    // rows arrive in creation order — the order the fixtures are written in.
+    expect(titlesInOrder()).toEqual([
+      "Bank the result",
+      "Alphabetise the shelf",
+      "Correct the record",
+    ]);
+
+    await userEvent.click(screen.getByRole("columnheader", { name: "Title" }));
+
+    await waitFor(() =>
+      expect(titlesInOrder()).toEqual([
+        "Alphabetise the shelf",
+        "Bank the result",
+        "Correct the record",
+      ]),
+    );
+  });
+
+  /**
+   * The header is a three-step cycle, and the third step is the way back: a
+   * person who sorted a column can put the list the way they found it without
+   * having to remember what order it was in.
+   *
+   * The rows are checked and not just the header, because clearing the sort has
+   * to reach the server — a column that only dropped its own arrow would leave
+   * the list sitting in an order nothing was claiming any more.
+   */
+  it("clears the sort on the third click, and the rows come back unsorted", async () => {
+    api.reset([aTask({ title: "Beta" }), aTask({ title: "Alpha" })]);
+
+    renderTaskList();
+    await screen.findByText("Beta");
+
+    // Unsorted: creation order, which is the order the fixtures are written in.
+    expect(titlesInOrder()).toEqual(["Beta", "Alpha"]);
+
+    const header = screen.getByRole("columnheader", { name: "Title" });
+
+    await userEvent.click(header);
+    await waitFor(() => expect(titlesInOrder()).toEqual(["Alpha", "Beta"]));
+
+    await userEvent.click(header);
+    await waitFor(() => expect(titlesInOrder()).toEqual(["Beta", "Alpha"]));
+
+    await userEvent.click(header);
+    await waitFor(() => expect(useTaskListStore.getState().sort).toBeNull());
+    expect(titlesInOrder()).toEqual(["Beta", "Alpha"]);
+  });
+
+  // The arrow is the order the rows actually arrived in. No column may claim a
+  // sorted list before one is asked for, and none may go on claiming one once
+  // the sort is cleared.
+  it("marks only the sorted column, and only while there is a sort", async () => {
+    api.reset([aTask({ title: "Alpha" }), aTask({ title: "Beta" })]);
+
+    renderTaskList();
+    await screen.findByText("Alpha");
+
+    const header = screen.getByRole("columnheader", { name: "Title" });
+    const other = screen.getByRole("columnheader", { name: "Created" });
+
+    // Ant Design leaves the attribute off an unsorted column rather than
+    // writing `none`, so absence is what "this column claims nothing" looks
+    // like — here at the start, and again after the third click.
+    expect(header).not.toHaveAttribute("aria-sort");
+
+    for (const expected of ["ascending", "descending", null]) {
+      await userEvent.click(header);
+
+      await waitFor(() =>
+        expect(header.getAttribute("aria-sort")).toBe(expected),
+      );
+      expect(other).not.toHaveAttribute("aria-sort");
+    }
+  });
+
+  // The sort applies to every matching Task and not the page on screen, so the
+  // page number counts into a result set the new order has just replaced.
+  it("returns to the first page when the sort changes", async () => {
+    api.reset(
+      Array.from({ length: 8 }, (_, index) =>
+        aTask({ title: `Paged task ${index}` }),
+      ),
+    );
+
+    renderTaskList();
+    await screen.findByText("Paged task 0");
+
+    // By title, which is what Ant Design puts on a pager item: the item is an
+    // `li` wrapping an `a` with no `href`, so it answers to neither role.
+    await userEvent.click(screen.getByTitle("2"));
+    await waitFor(() => expect(useTaskListStore.getState().page).toBe(2));
+
+    await userEvent.click(screen.getByRole("columnheader", { name: "Status" }));
+
+    await waitFor(() =>
+      expect(useTaskListStore.getState().page).toBe(TASK_PAGE.first),
+    );
   });
 
   /**
@@ -230,14 +375,14 @@ describe("the task list", () => {
     await screen.findByText("Write the plan");
 
     await userEvent.click(buttonIn("Write the plan", "Edit"));
-    expect(await screen.findByLabelText("Title")).toHaveValue("Write the plan");
+    expect(await formField("Title")).toHaveValue("Write the plan");
 
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     await userEvent.click(buttonIn("Ship the API", "Edit"));
 
-    expect(await screen.findByLabelText("Title")).toHaveValue("Ship the API");
-    expect(screen.getByLabelText("Description")).toHaveValue("The API");
+    expect(await formField("Title")).toHaveValue("Ship the API");
+    expect(await formField("Description")).toHaveValue("The API");
   });
 
   /**
@@ -279,7 +424,7 @@ describe("the task list", () => {
     await screen.findByText("No tasks yet.");
 
     await userEvent.click(screen.getByRole("button", { name: /New task/ }));
-    await userEvent.type(await screen.findByLabelText("Title"), "Write it up");
+    await userEvent.type(await formField("Title"), "Write it up");
 
     const answer = api.holdAnswers();
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
@@ -315,7 +460,7 @@ describe("the task list", () => {
     await screen.findByText("No tasks yet.");
 
     await userEvent.click(screen.getByRole("button", { name: /New task/ }));
-    await userEvent.type(await screen.findByLabelText("Title"), "Write it up");
+    await userEvent.type(await formField("Title"), "Write it up");
 
     // The element antd hangs that behaviour off: the scrollable wrapper the
     // dialog floats in, whose visible area is everything around it.
@@ -324,7 +469,7 @@ describe("the task list", () => {
     await userEvent.click(outside as HTMLElement);
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByLabelText("Title")).toHaveValue("Write it up");
+    expect(await formField("Title")).toHaveValue("Write it up");
   });
 
   /**

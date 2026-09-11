@@ -248,16 +248,16 @@ auth middleware. `id` always means a Task's id. See `CONTEXT.md`.
 
 JSON REST. All routes require a valid Auth0 access token.
 
-| Method   | Path                     | Purpose                                         | Success                   |
-| -------- | ------------------------ | ----------------------------------------------- | ------------------------- |
-| `GET`    | `/api/tasks`             | Owner-scoped list; `page`, `pageSize`, `status` | `200` + `Paginated<Task>` |
-| `GET`    | `/api/tasks/:id`         | Single task                                     | `200` + `Task` + `ETag`   |
-| `POST`   | `/api/tasks`             | Create, always as `PENDING`                     | `201` + `Task`            |
-| `PATCH`  | `/api/tasks/:id`         | Edit title/description; requires `If-Match`     | `200` + `Task`            |
-| `POST`   | `/api/tasks/:id/start`   | `PENDING → IN_PROGRESS`                         | `200` + `Task`            |
-| `POST`   | `/api/tasks/:id/done`    | `IN_PROGRESS → DONE`, idempotent                | `200` + `Task`            |
-| `POST`   | `/api/tasks/:id/archive` | `DONE → ARCHIVED`                               | `200` + `Task`            |
-| `DELETE` | `/api/tasks/:id`         | Delete, allowed from any status; no `If-Match`  | `204`                     |
+| Method   | Path                     | Purpose                                                              | Success                   |
+| -------- | ------------------------ | -------------------------------------------------------------------- | ------------------------- |
+| `GET`    | `/api/tasks`             | Owner-scoped list; `page`, `pageSize`, `status`, `sort`, `direction` | `200` + `Paginated<Task>` |
+| `GET`    | `/api/tasks/:id`         | Single task                                                          | `200` + `Task` + `ETag`   |
+| `POST`   | `/api/tasks`             | Create, always as `PENDING`                                          | `201` + `Task`            |
+| `PATCH`  | `/api/tasks/:id`         | Edit title/description; requires `If-Match`                          | `200` + `Task`            |
+| `POST`   | `/api/tasks/:id/start`   | `PENDING → IN_PROGRESS`                                              | `200` + `Task`            |
+| `POST`   | `/api/tasks/:id/done`    | `IN_PROGRESS → DONE`, idempotent                                     | `200` + `Task`            |
+| `POST`   | `/api/tasks/:id/archive` | `DONE → ARCHIVED`                                                    | `200` + `Task`            |
+| `DELETE` | `/api/tasks/:id`         | Delete, allowed from any status; no `If-Match`                       | `204`                     |
 
 State changes are dedicated endpoints rather than `PATCH { status }`, which
 keeps the transition rules and the idempotent Done path explicit and leaves
@@ -310,10 +310,26 @@ round trip returns both. `page` defaults to 1; `pageSize` defaults to 10 and
 caps at 100; `status` is optional with **no default**, and omitting it is not
 the same as asking for everything: the list then shows every status except
 `ARCHIVED`. `?status=ARCHIVED` is what asks for archived tasks, and is the only
-thing that returns them. Ordering is fixed `created_at desc`, with `id desc`
-breaking the tie — two tasks can share a `created_at` to the microsecond, and on
-an ordering that is not total Postgres may return them in either order, so the
-same row shows up on two pages or on none.
+thing that returns them.
+
+**Ordering** is the client's to choose, from a whitelist: `sort` is one of
+`title`, `status` or `createdAt` and `direction` is `asc` or `desc`. A
+whitelist rather than a column name, because the value reaches an `ORDER BY`.
+`status` sorts by the Postgres enum, which orders by the order its values were
+declared — the lifecycle — so ascending runs `PENDING` to `ARCHIVED` rather
+than alphabetically. A `direction` without a `sort` orders nothing and is
+ignored; it is not a `422`, because the request asked for nothing unusual.
+
+**Neither has a default**, and omitting `sort` is a real answer rather than a
+missing one: the list is unsorted, and no column claims it. Storage still
+returns those rows in creation order with `id` making it total — paging over an
+ordering that is not total shows the same row on two pages and another on none
+— but that is the stable order an unsorted list falls back to, not a sort the
+client asked for, and nothing above the repository names it.
+
+Whatever the sort, `id` breaks the tie and runs the same way as the column
+before it. Two tasks can share a `created_at` to the microsecond, and far more
+of them share a title or a status.
 
 A page past the end is the one case the window function cannot answer: no rows
 means no row to read `total` from, and `0` there would collapse the pager onto
@@ -683,7 +699,8 @@ real win: the API client reads the token from the store instead of needing
 hooks, so the `fetch` wrapper stays a plain function.
 
 **`useTaskListStore`** — the list's _view_ state: `page`, `pageSize`, `status`,
-and `formTarget`, the Task the form is open on.
+`sort` (a `{ field, direction }` or `null`), and `formTarget`, the Task the
+form is open on.
 
 `formTarget` is one discriminated field — `{ mode: 'create' }`,
 `{ mode: 'edit', taskId }`, or `null` — rather than a selection and an editing
@@ -695,14 +712,24 @@ itself is looked up in the query cache, so the store never holds a Task.
 already caches, invalidates and deduplicates it; duplicating it into a store
 means two caches to reconcile on every mutation, and the replay-`200` path gets
 materially harder. Instead the Zustand params _are_ the query key —
-`['tasks', { page, pageSize, status }]` — so changing a filter refetches
-automatically, with no effect watching the filter to ask for one: a different
-filter is simply a key with nothing cached under it. Zustand owns "what the user
-is looking at"; Query owns the rows.
+`['tasks', { page, pageSize, status, sort, direction }]` — so changing a filter
+or a sort refetches automatically, with no effect watching either to ask for
+one: a different filter is simply a key with nothing cached under it. Zustand
+owns "what the user is looking at"; Query owns the rows.
 
-Changing the filter resets `page` to 1. The page number counts into a result set
-the filter has just replaced, and keeping it lands the person past the end of
-the new one — which reads as a filter that matched nothing.
+Sorting is server-side for the same reason paging is: the rows in hand are one
+page, so a column sorted in the browser would reorder that page and misreport
+every other one. The table's headers are `sorter: true` with a controlled
+`sortOrder`, which is Ant Design's way of saying the order came from elsewhere,
+and its default three-step cycle is the one wanted: ascending, descending, then
+no sort at all. The store holds the column and its direction as one nullable
+value, so a direction cannot outlive the column it belonged to and `null` is
+the unsorted list the person arrives at.
+
+Changing the filter or the sort resets `page` to 1 — clearing the sort
+included. The page number counts into a result set that has just been replaced,
+and keeping it lands the person past the end of the new one, which reads as a
+filter that matched nothing.
 
 `['tasks']` itself is never fetched; it is the prefix the pages hang off, and
 what every mutation invalidates. An optimistic write touches only the page on
@@ -743,7 +770,8 @@ panel or the list. It does **not** fire `loginWithRedirect()` on its own: a
 signed-out person who lands on the app should see what the app is and press a
 button, not get bounced to a login screen they did not ask for.
 
-- `Table` for the list, with server-driven pagination wired to `useTaskListStore`
+- `Table` for the list, with server-driven pagination and sorting wired to
+  `useTaskListStore`
 - `Form` + `Modal` for create and edit
 - `Tag` for status, `Popconfirm` for delete, `message` / `notification` for outcomes
 - A row offers three icon controls — Edit, Next, Delete — each named by a

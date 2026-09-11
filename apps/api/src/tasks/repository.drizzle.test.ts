@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 
 import * as schema from "@/db/schema";
+import type { OwnerScopedListQuery } from "@/tasks/repository";
 import { createDrizzleTaskRepository } from "@/tasks/repository.drizzle";
 
 interface Statement {
@@ -114,12 +115,26 @@ const setClauseOf = (text: string) =>
     .replace(/^.*?\bset\b\s*/, "")
     .replace(/\s*\bwhere\b.*$/, "");
 
+/**
+ * A list read with the parts every one of them needs already filled in, and no
+ * sort — the unsorted list, which is what a test that is not about ordering
+ * should be reading.
+ */
+const aListQuery = (
+  overrides: Partial<OwnerScopedListQuery> = {},
+): OwnerScopedListQuery => ({
+  userId: "auth0|owner",
+  page: 1,
+  pageSize: 10,
+  ...overrides,
+});
+
 describe("createDrizzleTaskRepository", () => {
   describe("list", () => {
     it("filters on the Owner, with the User ID bound rather than interpolated", async () => {
       const { repository, statements } = recordingRepository();
 
-      await repository.list({ userId: "auth0|owner", page: 1, pageSize: 10 });
+      await repository.list(aListQuery());
 
       const [listed] = statements;
       expect(normalise(listed.text)).toContain('"tasks"."owner_id" = $1');
@@ -129,24 +144,57 @@ describe("createDrizzleTaskRepository", () => {
       expect(listed.text).not.toContain("auth0|owner");
     });
 
-    it("orders newest first, with a tiebreaker", async () => {
+    // Not a sort — no column claims it, and nothing above the repository names
+    // it. Paging over an order that is not total shows the same Task on two
+    // pages, so "no sort" still has to be some total `ORDER BY`.
+    it("falls back to a stable order when no sort was asked for", async () => {
       const { repository, statements } = recordingRepository();
 
-      await repository.list({ userId: "auth0|owner", page: 1, pageSize: 10 });
+      await repository.list(aListQuery());
 
       expect(normalise(statements[0].text)).toContain(
-        'order by "tasks"."created_at" desc, "tasks"."id" desc',
+        'order by "tasks"."created_at" asc, "tasks"."id" asc',
+      );
+    });
+
+    // A direction orders nothing without a column to run in, and the shared
+    // schema lets a query string spell one on its own.
+    it("ignores a direction that names no column", async () => {
+      const { repository, statements } = recordingRepository();
+
+      await repository.list(aListQuery({ direction: "desc" }));
+
+      expect(normalise(statements[0].text)).toContain(
+        'order by "tasks"."created_at" asc, "tasks"."id" asc',
+      );
+    });
+
+    it("orders by the column the sort names, both ways", async () => {
+      const { repository, statements } = recordingRepository();
+
+      await repository.list(aListQuery({ sort: "title", direction: "desc" }));
+
+      expect(normalise(statements[0].text)).toContain(
+        'order by "tasks"."title" desc, "tasks"."id" desc',
+      );
+    });
+
+    // The tiebreaker follows the column it breaks. Without a total order the
+    // same Task can come back on two pages, or on none — PLAN.md §6.
+    it("runs the tiebreaker the same way as the column", async () => {
+      const { repository, statements } = recordingRepository();
+
+      await repository.list(aListQuery({ sort: "status", direction: "asc" }));
+
+      expect(normalise(statements[0].text)).toContain(
+        'order by "tasks"."status" asc, "tasks"."id" asc',
       );
     });
 
     it("reads the page and its total in one round trip", async () => {
       const { repository, statements } = recordingRepository([aListRow(3)]);
 
-      const result = await repository.list({
-        userId: "auth0|owner",
-        page: 1,
-        pageSize: 10,
-      });
+      const result = await repository.list(aListQuery());
 
       expect(result.total).toBe(3);
       expect(statements).toHaveLength(1);
@@ -156,7 +204,7 @@ describe("createDrizzleTaskRepository", () => {
     it("offsets by whole pages", async () => {
       const { repository, statements } = recordingRepository([aListRow(99)]);
 
-      await repository.list({ userId: "auth0|owner", page: 3, pageSize: 25 });
+      await repository.list(aListQuery({ page: 3, pageSize: 25 }));
 
       // 25 to a page, third page: skip the first 50. `ARCHIVED` is the second
       // bound value because an unfiltered list still names the Status it leaves
@@ -167,7 +215,7 @@ describe("createDrizzleTaskRepository", () => {
     it("excludes Archived when no Status was asked for", async () => {
       const { repository, statements } = recordingRepository([aListRow(1)]);
 
-      await repository.list({ userId: "auth0|owner", page: 1, pageSize: 10 });
+      await repository.list(aListQuery());
 
       // No Status is still a predicate: Archived Tasks are put away, and the
       // unfiltered list is the work still in front of the Owner.
@@ -178,12 +226,7 @@ describe("createDrizzleTaskRepository", () => {
     it("matches the Status exactly when one was asked for", async () => {
       const { repository, statements } = recordingRepository([aListRow(1)]);
 
-      await repository.list({
-        userId: "auth0|owner",
-        page: 1,
-        pageSize: 10,
-        status: "DONE",
-      });
+      await repository.list(aListQuery({ status: "DONE" }));
 
       expect(normalise(statements[0].text)).toContain('"tasks"."status" = $2');
       expect(statements[0].values).toContain("DONE");
@@ -192,7 +235,7 @@ describe("createDrizzleTaskRepository", () => {
     it("counts separately when the page came back empty", async () => {
       const { repository, statements } = recordingRepository([]);
 
-      await repository.list({ userId: "auth0|owner", page: 9, pageSize: 10 });
+      await repository.list(aListQuery({ page: 9 }));
 
       // A window function has no row to report a count on, so the empty page —
       // and only the empty page — pays for a second statement.
@@ -207,12 +250,7 @@ describe("createDrizzleTaskRepository", () => {
     it("keeps the Status filter on the fallback count", async () => {
       const { repository, statements } = recordingRepository([]);
 
-      await repository.list({
-        userId: "auth0|owner",
-        page: 9,
-        pageSize: 10,
-        status: "DONE",
-      });
+      await repository.list(aListQuery({ page: 9, status: "DONE" }));
 
       // Otherwise a filtered list past its end reports the unfiltered total and
       // the pager offers pages that are all empty.

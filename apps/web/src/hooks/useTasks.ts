@@ -26,17 +26,27 @@ export function taskPageQueryKey(params: TaskListParams) {
 /**
  * What the person is looking at, as the list request wants it.
  *
- * The three fields are selected one at a time rather than as an object: a
- * selector that built one would return a new reference on every store
- * notification, which is the shape Zustand's snapshot comparison treats as a
- * change and loops on.
+ * The fields are selected one at a time rather than as an object: a selector
+ * that built one would return a new reference on every store notification,
+ * which is the shape Zustand's snapshot comparison treats as a change and
+ * loops on.
  */
 export function useTaskListParams(): TaskListParams {
   const page = useTaskListStore((state) => state.page);
   const pageSize = useTaskListStore((state) => state.pageSize);
   const status = useTaskListStore((state) => state.status);
+  const sort = useTaskListStore((state) => state.sort);
 
-  return { page, pageSize, status };
+  // The store keeps the column and its direction as one value, so neither can
+  // outlive the other; the query string spells them as two independent keys.
+  // An unsorted list asks for neither.
+  return {
+    page,
+    pageSize,
+    status,
+    sort: sort?.field,
+    direction: sort?.direction,
+  };
 }
 
 /**

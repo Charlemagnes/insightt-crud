@@ -1,4 +1,10 @@
-import type { Task, TaskStatus, UpdateTaskInput } from "@insightt/shared";
+import type {
+  SortDirection,
+  Task,
+  TaskSortField,
+  TaskStatus,
+  UpdateTaskInput,
+} from "@insightt/shared";
 
 /**
  * The one Status a list leaves out unless it is asked for by name.
@@ -25,6 +31,18 @@ export interface OwnerScopedListQuery {
   pageSize: number;
   /** Absent means every Status except `SHOWN_ONLY_WHEN_ASKED_FOR`. */
   status?: TaskStatus;
+  /**
+   * Which column orders the result set, and which way it runs. Absent is the
+   * unsorted list — no column was named, and the implementation falls back to
+   * the stable order paging needs.
+   *
+   * `direction` means nothing without `sort` and is ignored there, which is
+   * the one illegal-ish state this shape allows: the query string it is parsed
+   * from can spell `?direction=desc` alone, and refusing that would be a `422`
+   * on a request that asked for nothing unusual.
+   */
+  sort?: TaskSortField;
+  direction?: SortDirection;
 }
 
 /** Addresses one Task, and says who is asking. */
@@ -129,7 +147,9 @@ export type MarkDoneResult =
  */
 export interface TaskRepository {
   /**
-   * One page of the Owner's Tasks, newest first, with the total count.
+   * One page of the Owner's Tasks in the order the query asks for — or in the
+   * unsorted list's own stable order when it asks for none — with the total
+   * count.
    *
    * An unasked-for `status` narrows nothing except Archived, which is left out
    * — see `SHOWN_ONLY_WHEN_ASKED_FOR`. `total` counts the same rows the page

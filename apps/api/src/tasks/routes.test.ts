@@ -79,7 +79,10 @@ describe("GET /api/tasks", () => {
   });
 
   describe("ordering", () => {
-    it("orders newest first by creation time", async () => {
+    // Not a sort: no order was asked for, and none is reported back. What is
+    // pinned is only that the unsorted list has a stable order at all, which is
+    // what paging over it needs.
+    it("returns a stable order when no sort was asked for", async () => {
       const oldest = aTask({ createdAt: "2026-01-01T00:00:00.000Z" });
       const newest = aTask({ createdAt: "2026-03-01T00:00:00.000Z" });
       const middle = aTask({ createdAt: "2026-02-01T00:00:00.000Z" });
@@ -88,13 +91,92 @@ describe("GET /api/tasks", () => {
       const response = await request(app).get("/api/tasks");
 
       expect(idsOf(response.body.items)).toEqual([
-        newest.id,
-        middle.id,
         oldest.id,
+        middle.id,
+        newest.id,
       ]);
     });
 
-    it("orders Tasks sharing a creation time deterministically", async () => {
+    it("reverses when the direction does", async () => {
+      const oldest = aTask({ createdAt: "2026-01-01T00:00:00.000Z" });
+      const newest = aTask({ createdAt: "2026-03-01T00:00:00.000Z" });
+      const { app } = harness({ tasks: [oldest, newest] });
+
+      const response = await request(app).get(
+        "/api/tasks?sort=createdAt&direction=desc",
+      );
+
+      expect(idsOf(response.body.items)).toEqual([newest.id, oldest.id]);
+    });
+
+    it("orders by title when asked to", async () => {
+      const apple = aTask({ title: "Apple" });
+      const cherry = aTask({ title: "Cherry" });
+      const banana = aTask({ title: "Banana" });
+      const { app } = harness({ tasks: [cherry, apple, banana] });
+
+      const response = await request(app).get("/api/tasks?sort=title");
+
+      expect(idsOf(response.body.items)).toEqual([
+        apple.id,
+        banana.id,
+        cherry.id,
+      ]);
+    });
+
+    // The Postgres enum orders by the order its values were declared, which is
+    // the lifecycle. Alphabetically `ARCHIVED` would come first, which is the
+    // one order the column does not mean.
+    it("orders Status by the lifecycle, not the alphabet", async () => {
+      const pending = aTask({ status: "PENDING" });
+      const archived = aTask({ status: "ARCHIVED" });
+      const done = aTask({ status: "DONE" });
+      const { app } = harness({ tasks: [archived, done, pending] });
+
+      // Asked for by name, because an unfiltered list leaves Archived out.
+      const [ascending, descending] = await Promise.all([
+        request(app).get("/api/tasks?sort=status&status=ARCHIVED"),
+        request(app).get("/api/tasks?sort=status"),
+      ]);
+
+      expect(idsOf(ascending.body.items)).toEqual([archived.id]);
+      expect(idsOf(descending.body.items)).toEqual([pending.id, done.id]);
+    });
+
+    it("rejects a sort field the contract does not have", async () => {
+      const { app } = harness();
+
+      const response = await request(app).get("/api/tasks?sort=ownerId");
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("rejects a direction that is not one of the two", async () => {
+      const { app } = harness();
+
+      const response = await request(app).get("/api/tasks?direction=sideways");
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    // A direction has no column to run in, so it orders nothing rather than
+    // being a `422`: the request asked for nothing unusual.
+    it("ignores a direction sent without a sort", async () => {
+      const oldest = aTask({ createdAt: "2026-01-01T00:00:00.000Z" });
+      const newest = aTask({ createdAt: "2026-03-01T00:00:00.000Z" });
+      const { app } = harness({ tasks: [newest, oldest] });
+
+      const [asked, unsorted] = await Promise.all([
+        request(app).get("/api/tasks?direction=desc"),
+        request(app).get("/api/tasks"),
+      ]);
+
+      expect(idsOf(asked.body.items)).toEqual(idsOf(unsorted.body.items));
+    });
+
+    it("orders Tasks sharing a sort value deterministically", async () => {
       const sameInstant = "2026-01-01T00:00:00.000Z";
       const { app } = harness({
         tasks: [

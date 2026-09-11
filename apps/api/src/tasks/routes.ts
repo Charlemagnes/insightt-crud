@@ -38,13 +38,16 @@ export function createTaskRoutes(repository: TaskRepository): Router {
   const router = Router();
 
   router.get("/", listValidator, async (req, res) => {
-    const { page, pageSize, status } = listValidator.read(req).query;
+    const { page, pageSize, status, sort, direction } =
+      listValidator.read(req).query;
 
     const { items, total } = await repository.list({
       userId: actorOf(req).userId,
       page,
       pageSize,
       status,
+      sort,
+      direction,
     });
 
     const body: TaskPage = { items, page, pageSize, total };

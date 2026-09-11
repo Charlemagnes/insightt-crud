@@ -16,9 +16,10 @@ beforeEach(() => {
 
 /** The store's data, without the setters — what the list is actually looking at. */
 const view = () => {
-  const { page, pageSize, status, formTarget } = useTaskListStore.getState();
+  const { page, pageSize, status, sort, formTarget } =
+    useTaskListStore.getState();
 
-  return { page, pageSize, status, formTarget };
+  return { page, pageSize, status, sort, formTarget };
 };
 
 describe("the list view state", () => {
@@ -33,8 +34,55 @@ describe("the list view state", () => {
     expect(view().status).toBe(ALL_STATUSES);
   });
 
+  // No column claims the first list, and the API is asked for no order.
+  it("starts unsorted", () => {
+    expect(view().sort).toBeNull();
+  });
+
   it("starts with the form closed", () => {
     expect(view().formTarget).toBeNull();
+  });
+});
+
+describe("sorting", () => {
+  it("takes the column and the direction the header reports", () => {
+    useTaskListStore.getState().sortBy({ field: "title", direction: "desc" });
+
+    expect(view().sort).toEqual({ field: "title", direction: "desc" });
+  });
+
+  // The third click on a header clears the sort, and the list goes back to the
+  // one it started in: no column claiming it, and no order asked for.
+  it("clears back to unsorted", () => {
+    useTaskListStore.getState().sortBy({ field: "title", direction: "desc" });
+    useTaskListStore.getState().sortBy(null);
+
+    expect(view().sort).toBeNull();
+  });
+
+  // The sort orders every matching Task, not the page on screen, so page 4 of
+  // one order is a different slice of a different result set in the next.
+  it("goes back to the first page", () => {
+    useTaskListStore.getState().goToPage(4, TASK_PAGE.defaultSize);
+    useTaskListStore.getState().sortBy({ field: "status", direction: "asc" });
+
+    expect(view().page).toBe(TASK_PAGE.first);
+  });
+
+  it("goes back to the first page when the sort is cleared too", () => {
+    useTaskListStore.getState().sortBy({ field: "status", direction: "asc" });
+    useTaskListStore.getState().goToPage(4, TASK_PAGE.defaultSize);
+    useTaskListStore.getState().sortBy(null);
+
+    expect(view().page).toBe(TASK_PAGE.first);
+  });
+
+  it("leaves the Status filter and the page size alone", () => {
+    useTaskListStore.getState().filterByStatus("DONE");
+    useTaskListStore.getState().goToPage(TASK_PAGE.first, 50);
+    useTaskListStore.getState().sortBy({ field: "title", direction: "asc" });
+
+    expect(view()).toMatchObject({ status: "DONE", pageSize: 50 });
   });
 });
 
@@ -146,9 +194,15 @@ describe("the form target", () => {
  */
 describe("the query key it forms", () => {
   const keyForCurrentView = () => {
-    const { page, pageSize, status } = useTaskListStore.getState();
+    const { page, pageSize, status, sort } = useTaskListStore.getState();
 
-    return taskPageQueryKey({ page, pageSize, status });
+    return taskPageQueryKey({
+      page,
+      pageSize,
+      status,
+      sort: sort?.field,
+      direction: sort?.direction,
+    });
   };
 
   it("changes when the page does", () => {
@@ -163,6 +217,34 @@ describe("the query key it forms", () => {
     const before = keyForCurrentView();
 
     useTaskListStore.getState().goToPage(TASK_PAGE.first, 50);
+
+    expect(keyForCurrentView()).not.toEqual(before);
+  });
+
+  it("changes when the sort does", () => {
+    const before = keyForCurrentView();
+
+    useTaskListStore.getState().sortBy({ field: "title", direction: "asc" });
+
+    expect(keyForCurrentView()).not.toEqual(before);
+  });
+
+  it("changes when only the direction does", () => {
+    useTaskListStore.getState().sortBy({ field: "title", direction: "asc" });
+    const before = keyForCurrentView();
+
+    useTaskListStore.getState().sortBy({ field: "title", direction: "desc" });
+
+    expect(keyForCurrentView()).not.toEqual(before);
+  });
+
+  // Clearing the sort is a different question than any sorted one, so the
+  // unsorted page cannot be served out of a sorted page's cache entry.
+  it("changes when the sort is cleared", () => {
+    useTaskListStore.getState().sortBy({ field: "title", direction: "asc" });
+    const before = keyForCurrentView();
+
+    useTaskListStore.getState().sortBy(null);
 
     expect(keyForCurrentView()).not.toEqual(before);
   });
