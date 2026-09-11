@@ -31,8 +31,8 @@ export function createTask(input: CreateTaskInput): Promise<Task> {
   return apiFetch("/api/tasks", TaskSchema, jsonRequest("POST", input));
 }
 
-/** An edit, and the Version of the Task it was written against. */
-export interface TaskEdit {
+/** The arguments `updateTask` sends: the edit, and what it was written against. */
+export interface TaskEditRequest {
   id: string;
   /** The Version the browser last saw, which becomes the `If-Match`. */
   version: number;
@@ -51,7 +51,11 @@ export interface TaskEdit {
  * has closed is not one of them — the form does not offer it, and naming it
  * anyway would be `422 FIELD_NOT_EDITABLE`.
  */
-export function updateTask({ id, version, changes }: TaskEdit): Promise<Task> {
+export function updateTask({
+  id,
+  version,
+  changes,
+}: TaskEditRequest): Promise<Task> {
   const init = jsonRequest("PATCH", changes);
 
   return apiFetch(`/api/tasks/${id}`, TaskSchema, {

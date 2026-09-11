@@ -1,4 +1,4 @@
-import type { Task, TaskPage } from "@insightt/shared";
+import type { Task, TaskPage, UpdateTaskInput } from "@insightt/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -30,10 +30,17 @@ export function useCreateTask() {
   });
 }
 
-/** What an edit needs: the Task as the browser last saw it, and the changes. */
-export interface TaskEditVariables {
+/**
+ * An edit: the Task as the browser last saw it, and what to change about it.
+ *
+ * `changes` is the shared `UpdateTaskInput` and not a shape derived from
+ * `Task`. It is the `PATCH` body, `packages/shared` is the authority on
+ * anything that crosses the wire, and deriving it from the response shape would
+ * be the inversion PLAN.md §11 rejects.
+ */
+export interface TaskEdit {
   task: Task;
-  changes: Partial<Pick<Task, "title" | "description">>;
+  changes: UpdateTaskInput;
 }
 
 /**
@@ -46,7 +53,7 @@ export interface TaskEditVariables {
  * so the row the person is left looking at is the current one.
  */
 export function useUpdateTask() {
-  return useTaskRowMutation<TaskEditVariables, Task>({
+  return useTaskRowMutation<TaskEdit, Task>({
     run: ({ task, changes }) =>
       updateTask({ id: task.id, version: task.version, changes }),
     idOf: ({ task }) => task.id,

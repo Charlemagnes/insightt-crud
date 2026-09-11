@@ -716,6 +716,49 @@ describe("PATCH /api/tasks/:id", () => {
       expect(after.body.version).toBe(2);
     });
 
+    it("reports a stale edit as a conflict, not as a closed field", async () => {
+      // The Task was PENDING when this caller read it at version 1, and has
+      // since been started and finished by someone else.
+      const task = aTask({ status: "DONE", version: 3 });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editAt(app, task, etagFor(1)).send({
+        description: "Written against the PENDING copy",
+      });
+
+      // Not FIELD_NOT_EDITABLE: the description is closed on the Task as it is
+      // now, but the caller never saw that Status. Their copy is stale, and a
+      // stale copy is what the frontend refreshes on.
+      expect(response.status).toBe(412);
+      expect(response.body.error.code).toBe("VERSION_CONFLICT");
+    });
+
+    it("reports a stale edit as a conflict, not as a no-op", async () => {
+      const task = aTask({ title: "Renamed elsewhere", version: 3 });
+      const { app } = harness({ tasks: [task] });
+
+      // The same title the Task now has — but arrived at independently, from a
+      // copy two Versions old.
+      const response = await editAt(app, task, etagFor(1)).send({
+        title: "Renamed elsewhere",
+      });
+
+      expect(response.status).toBe(412);
+      expect(response.body.error.code).toBe("VERSION_CONFLICT");
+    });
+
+    it("still reports a missing Task as NOT_FOUND when the precondition is unreadable", async () => {
+      const theirs = aTask({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const response = await editAt(app, theirs, "*").send({ title: "After" });
+
+      // The precondition is checked against a Task, never before one is found,
+      // so a 412 here would confirm that someone else's Task exists.
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe("NOT_FOUND");
+    });
+
     it("reports a stale Version differently from an illegal Transition", async () => {
       const stale = aTask({ status: "PENDING", version: 2 });
       const archived = aTask({ status: "ARCHIVED" });

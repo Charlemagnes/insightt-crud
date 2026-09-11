@@ -292,7 +292,7 @@ Errors return `{ error: { code, message, details? } }`.
 |---|---|---|
 | `UNAUTHENTICATED` | 401 | missing, invalid or expired token |
 | `NOT_FOUND` | 404 | no such task, or not owned by the Actor |
-| `VALIDATION_FAILED` | 422 | payload fails Zod; `details` carries `error.issues`. Also covers a body `express.json` could not read at all — unparseable or over the size limit — reported as `422` rather than the parser's own `400`/`413` so this table stays the whole vocabulary, with the parser's reason in `details` |
+| `VALIDATION_FAILED` | 422 | payload fails Zod; `details` carries `error.issues`. Also covers a body `express.json` could not read at all — unparseable or over the size limit — reported as `422` rather than the parser's own `400`/`413` so this table stays the whole vocabulary, with the parser's reason in `details`. And a `PATCH` that would change nothing: the body passes Zod but asks for values the task already holds, so there is no field to blame and no `details` |
 | `FIELD_NOT_EDITABLE` | 422 | field not mutable in the task's current status |
 | `INVALID_TRANSITION` | 409 | transition not permitted from the current status |
 | `VERSION_CONFLICT` | 412 | `If-Match` present but stale |
@@ -325,10 +325,14 @@ owner-scoped end to end, so a non-owner cannot address the task at all.
 **Field mutability by status.** A documented whitelist; no typo-detection
 heuristic, no similarity threshold. Anything outside it is
 `422 FIELD_NOT_EDITABLE`. The whitelist needs the task, so `PATCH` reads it
-before it writes — and that read cannot go stale in a way that matters, because
-every transition raises the version and a task that moved in between fails the
-`If-Match` guard. The machine only ever narrows what is editable, so the worst
-the read can be is too permissive, which is exactly what the guard catches.
+before it writes — and **the version is checked against that read first, before
+the whitelist or the no-op check**. Both of those answer questions about a
+particular task, and the one just read is only the caller's task while the
+version still matches: an edit written against a `PENDING` task that has since
+gone `DONE` is a stale copy, not a closed field, and reporting it as
+`FIELD_NOT_EDITABLE` would name a status the caller never saw. The guard in the
+`UPDATE`'s own `WHERE` stays as well; the early check is what makes the refusals
+honest, and the one in the statement is what makes the write safe.
 
 | Status | Edit title | Edit description | Delete | Next transition |
 |---|---|---|---|---|

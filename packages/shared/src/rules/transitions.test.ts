@@ -1,8 +1,9 @@
-import { TaskStatus } from "../schemas/task";
+import { TaskStatus, type Task } from "../schemas/task";
 import {
   canEdit,
   canEditAnything,
   canTransition,
+  changedFields,
   EDITABLE_FIELDS,
   LIFECYCLE,
   nextStatus,
@@ -133,5 +134,53 @@ describe("field editability", () => {
     expect(canEditAnything("IN_PROGRESS")).toBe(true);
     // Still editable, just not in every field — an Edit control stays enabled.
     expect(canEditAnything("DONE")).toBe(true);
+  });
+});
+
+describe("changedFields", () => {
+  const task: Task = {
+    id: "00000000-0000-4000-8000-000000000001",
+    title: "Before",
+    description: "Also before",
+    status: "PENDING",
+    version: 1,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    completedAt: null,
+  };
+
+  it("keeps a field whose value differs", () => {
+    expect(changedFields(task, { title: "After" })).toEqual({ title: "After" });
+  });
+
+  it("drops a field that already holds the value it asks for", () => {
+    expect(changedFields(task, { title: "Before" })).toEqual({});
+  });
+
+  it("drops only the unchanged half of an edit", () => {
+    expect(
+      changedFields(task, { title: "Before", description: "After" }),
+    ).toEqual({ description: "After" });
+  });
+
+  it("treats a field the edit did not name as no change", () => {
+    // Omitting a key means "leave it alone", which is what leaving it out of
+    // the answer means too.
+    expect(changedFields(task, { title: "After" })).not.toHaveProperty(
+      "description",
+    );
+  });
+
+  it("keeps a cleared description, which is a change", () => {
+    expect(changedFields(task, { description: null })).toEqual({
+      description: null,
+    });
+  });
+
+  it("drops a cleared description on a Task that has none", () => {
+    const blank = { ...task, description: null };
+
+    // Clearing what is already clear raises the Version for nothing.
+    expect(changedFields(blank, { description: null })).toEqual({});
   });
 });

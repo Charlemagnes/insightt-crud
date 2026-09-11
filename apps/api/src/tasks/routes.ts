@@ -1,5 +1,6 @@
 import {
   canEdit,
+  changedFields,
   CreateTaskInput,
   EDITABLE_FIELDS,
   TaskIdParam,
@@ -9,7 +10,6 @@ import {
   type Task,
   type TaskPage,
   type TaskStatus,
-  type UpdateTaskInput as TaskEdit,
 } from "@insightt/shared";
 import type { Request, Response } from "express";
 import { Router } from "express";
@@ -95,18 +95,24 @@ export function createTaskRoutes(repository: TaskRepository): Router {
     // a request that can be answered safely, only one that would clobber.
     const expectedVersion = requiredVersionOf(req);
 
-    // The whitelist needs the Task, so it costs a read. The read cannot go
-    // stale in a way that matters: every Transition raises the Version, so a
-    // Task that moved between this read and the write below fails the Version
-    // guard and comes back `412`. The Status machine only ever narrows what is
-    // editable, so the worst this read can be is too permissive — and too
-    // permissive is exactly what the guard catches.
+    // The whitelist and the no-op check both need the Task, so an edit costs a
+    // read before it writes.
     const task = await repository.findById({ userId, id: params.id });
 
     if (!task) {
       throw new ApiError(404, "NOT_FOUND", "Task not found");
     }
 
+    // The Version first, and before any rule that is read off the Task.
+    //
+    // Both checks below answer questions about a *particular* Task, and the one
+    // just read is only the caller's Task if the Version still matches. Asking
+    // them first would report a Task the caller has not seen: an edit written
+    // against a `PENDING` Task that has since gone `DONE` would come back
+    // `422 FIELD_NOT_EDITABLE`, about a Status the caller never saw, when the
+    // truth is that their copy is stale. That is `412`, and `412` is what the
+    // frontend refreshes on.
+    assertCurrent(task, expectedVersion);
     assertEditable(task, changes);
     assertChangesSomething(task, changes);
 
@@ -117,6 +123,9 @@ export function createTaskRoutes(repository: TaskRepository): Router {
       changes,
     });
 
+    // The Version was checked above and is checked again in the `WHERE` of the
+    // statement itself. The first is what makes the refusals honest; this one
+    // is what makes the write safe, and it closes the window the read opened.
     if (result.outcome !== "changed") {
       throw editRefusalOf(result);
     }
@@ -234,9 +243,33 @@ function requiredVersionOf(req: Request): number {
 /**
  * A Version no Task is at, which is what an unreadable `If-Match` becomes. It
  * is negative because `version` starts at 1 and only rises, so nothing can
- * reach it and the guarded `UPDATE` matches no row.
+ * reach it and no check below can match.
+ *
+ * A sentinel rather than `null` and an early `412`, because an early refusal
+ * would answer before the Task had been found — and a `412` for a Task that
+ * does not exist, or belongs to someone else, would confirm the existence that
+ * every other answer here is careful not to. Carried this way, an unreadable
+ * precondition against someone else's Task is the same `404` as anything else.
  */
 const UNMATCHABLE_VERSION = -1;
+
+/**
+ * Refuses an edit written against a Version the Task has moved past.
+ *
+ * This is the same comparison the guarded `UPDATE` makes, asked early so that
+ * the rules below are applied to the Task the caller actually read. It does not
+ * replace the one in the statement: between this and the write the Task can
+ * still move, and only the `WHERE` can refuse that.
+ */
+function assertCurrent(task: Task, expectedVersion: number): void {
+  if (task.version !== expectedVersion) {
+    throw new ApiError(
+      412,
+      "VERSION_CONFLICT",
+      "This task changed since you loaded it",
+    );
+  }
+}
 
 /**
  * Refuses an edit that names a field the Task's Status has closed.
@@ -249,7 +282,7 @@ const UNMATCHABLE_VERSION = -1;
  * a Transition. The Task is not being asked to move, it is being asked to
  * change a field that its Status has put beyond reach.
  */
-function assertEditable(task: Task, changes: TaskEdit): void {
+function assertEditable(task: Task, changes: UpdateTaskInput): void {
   const closed = namedFields(changes).filter(
     (field) => !canEdit(task.status, field),
   );
@@ -275,12 +308,8 @@ function assertEditable(task: Task, changes: TaskEdit): void {
  * that happened. The empty body `{}` is refused one layer up, by the shared
  * schema; this is the same refusal for a body that is full but inert.
  */
-function assertChangesSomething(task: Task, changes: TaskEdit): void {
-  const changed = namedFields(changes).some(
-    (field) => changes[field] !== task[field],
-  );
-
-  if (!changed) {
+function assertChangesSomething(task: Task, changes: UpdateTaskInput): void {
+  if (Object.keys(changedFields(task, changes)).length === 0) {
     throw new ApiError(
       422,
       "VALIDATION_FAILED",
@@ -293,11 +322,11 @@ function assertChangesSomething(task: Task, changes: TaskEdit): void {
  * The fields an edit names, in the whitelist's own order.
  *
  * Built by asking `EDITABLE_FIELDS` what is present rather than by reading the
- * body's keys, so a key the schema does not know about cannot reach either
- * check above — `strictObject` has already refused one, and this is the second
- * lock on the same door.
+ * body's keys, so a key the schema does not know about cannot reach the
+ * whitelist check — `strictObject` has already refused one, and this is the
+ * second lock on the same door.
  */
-function namedFields(changes: TaskEdit): EditableField[] {
+function namedFields(changes: UpdateTaskInput): EditableField[] {
   return EDITABLE_FIELDS.filter((field) => changes[field] !== undefined);
 }
 

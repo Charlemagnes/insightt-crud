@@ -2,10 +2,12 @@
 
 import {
   canEdit,
+  changedFields,
   CreateTaskInput,
   EDITABLE_FIELDS,
   TASK_LIMITS,
   UpdateTaskInput,
+  type EditableField,
   type Task,
 } from "@insightt/shared";
 import { App, Form, Input, Modal } from "antd";
@@ -17,11 +19,7 @@ import {
   clearFieldErrors,
   issuesIn,
 } from "@/forms/zodFieldErrors";
-import {
-  useCreateTask,
-  useUpdateTask,
-  type TaskEditVariables,
-} from "@/hooks/useTaskMutations";
+import { useCreateTask, useUpdateTask } from "@/hooks/useTaskMutations";
 
 /**
  * What the two inputs hold. Always both, always strings: a text area that was
@@ -35,14 +33,6 @@ interface TaskFormValues {
 
 /** A form with nothing typed in it, which is what a create starts from. */
 const BLANK: TaskFormValues = { title: "", description: "" };
-
-/**
- * The inputs this form has, taken from the whitelist rather than listed again.
- * It is the same list `canEdit` answers questions about, so a field that the
- * rules know and the form does not would be a `FIELD_NOT_EDITABLE` nothing
- * could be marked with.
- */
-const FIELDS = EDITABLE_FIELDS;
 
 interface TaskFormModalProps {
   open: boolean;
@@ -107,7 +97,7 @@ export function TaskFormModal({ open, onClose, task }: TaskFormModalProps) {
     const parsed = CreateTaskInput.safeParse(form.getFieldsValue());
 
     if (!parsed.success) {
-      report(attachZodErrors(form, parsed.error, FIELDS));
+      report(attachZodErrors(form, parsed.error, EDITABLE_FIELDS));
       return;
     }
 
@@ -124,10 +114,13 @@ export function TaskFormModal({ open, onClose, task }: TaskFormModalProps) {
     const parsed = UpdateTaskInput.safeParse(form.getFieldsValue());
 
     if (!parsed.success) {
-      report(attachZodErrors(form, parsed.error, FIELDS));
+      report(attachZodErrors(form, parsed.error, EDITABLE_FIELDS));
       return;
     }
 
+    // Only what actually differs, which is also what keeps a field the Status
+    // has closed out of the request: a disabled input still holds the Task's
+    // own value, so it never appears here.
     const changes = changedFields(edited, parsed.data);
 
     // An edit that changes nothing is refused here as well as at the API,
@@ -177,7 +170,7 @@ export function TaskFormModal({ open, onClose, task }: TaskFormModalProps) {
         error.code === "FIELD_NOT_EDITABLE"
       ) {
         report(
-          attachIssues(form, issuesIn(error.details), FIELDS),
+          attachIssues(form, issuesIn(error.details), EDITABLE_FIELDS),
           error.message,
         );
         return;
@@ -262,34 +255,7 @@ function valuesOf(task: Task): TaskFormValues {
  * the same predicate the API enforces, so no enabled input can produce a
  * `FIELD_NOT_EDITABLE`.
  */
-function isEditable(task: Task | undefined, field: (typeof FIELDS)[number]) {
+function isEditable(task: Task | undefined, field: EditableField): boolean {
   return task === undefined || canEdit(task.status, field);
 }
 
-/**
- * The fields this edit actually changes, which is what gets sent.
- *
- * Sending the whole form instead would name every field on every save, and a
- * field the Task's Status has closed would then be refused even when the
- * person had not touched it. A disabled input still holds the Task's own value,
- * so it never appears here.
- */
-function changedFields(
-  task: Task,
-  edited: UpdateTaskInput,
-): TaskEditVariables["changes"] {
-  const changes: TaskEditVariables["changes"] = {};
-
-  if (edited.title !== undefined && edited.title !== task.title) {
-    changes.title = edited.title;
-  }
-
-  if (
-    edited.description !== undefined &&
-    edited.description !== task.description
-  ) {
-    changes.description = edited.description;
-  }
-
-  return changes;
-}
