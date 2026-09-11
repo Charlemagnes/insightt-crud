@@ -1,3 +1,21 @@
+/**
+ * **A fake, not a mock.** The distinction is Meszaros' (*xUnit Test Patterns*)
+ * and it is the reason for the filename: a mock records the calls made to it so
+ * a test can assert on them, where a fake is a real working implementation that
+ * takes a shortcut — here, an array instead of Postgres. Everything below
+ * genuinely enforces Owner scoping, ordering, paging, the Version guard and the
+ * Transition rules, because those are the behaviours the tests are checking.
+ *
+ * The sibling is named the same way: `repository.drizzle.ts` and
+ * `repository.fake.ts` both implement the interface in `repository.ts`, and
+ * neither is ever imported above it (CLAUDE.md). `.drizzle` names the mechanism
+ * because that is the only thing interesting about it; `.fake` names the role,
+ * because "in memory" is the shortcut rather than the point.
+ *
+ * `.mock.ts` would have been the wrong word twice over — nothing here asserts
+ * on interactions, and it would read as the Jest convention, which this is not.
+ */
+
 import { canTransition, type Task, type TaskStatus } from "@insightt/shared";
 
 import { randomUUID } from "node:crypto";
@@ -32,21 +50,19 @@ export function withoutOwner({ ownerId: _ownerId, ...task }: OwnedTask): Task {
 }
 
 /**
- * The in-memory fake, and the repository the whole HTTP test suite runs
- * against. It exists so a test can drive the real middleware stack — real CORS,
- * real logging, real auth boundary, real error mapping — with no database
- * behind it (PLAN.md §3).
+ * The repository the whole HTTP test suite runs against. It exists so a test
+ * can drive the real middleware stack — real CORS, real logging, real auth
+ * boundary, real error mapping — with no database behind it (PLAN.md §3).
  *
- * It reimplements Owner scoping, ordering and paging rather than stubbing them,
- * because those are the behaviours the tests are checking. A fake that answered
- * whatever it was told would prove the route calls a repository and nothing
- * more.
+ * A fake that answered whatever it was told would prove the route calls a
+ * repository and nothing more, which is why the methods below are written out
+ * rather than stubbed.
  *
  * What it cannot check is that the *Drizzle* repository agrees with it. Nothing
  * here proves the SQL filters on `owner_id`; that is what the seed script and
  * running the app are for.
  */
-export function createMemoryTaskRepository(
+export function createFakeTaskRepository(
   seed: OwnedTask[] = [],
 ): TaskRepository & { tasks: OwnedTask[] } {
   const tasks = [...seed];

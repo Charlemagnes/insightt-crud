@@ -108,7 +108,7 @@ export type MarkDoneResult =
 /**
  * The Task repository. `apps/api` never imports a concrete implementation above
  * this line, so nothing that reads Tasks knows Drizzle exists — which is what
- * lets the whole HTTP test suite run against `createMemoryTaskRepository`.
+ * lets the whole HTTP test suite run against `createFakeTaskRepository`.
  *
  * It returns wire-shaped `Task` values, not database rows: the snake_case row
  * stops at `mappers.ts`, one layer below (PLAN.md §11).

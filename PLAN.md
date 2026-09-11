@@ -65,7 +65,7 @@ apps/api/src/     index.ts  app.ts  env.ts
                   tasks/   routes  service  mappers
                            repository            (the interface)
                            repository.drizzle    (Postgres)
-                           repository.memory     (the test fake)
+                           repository.fake       (the test fake)
                   testing/harness.ts
                   types/express.d.ts
 

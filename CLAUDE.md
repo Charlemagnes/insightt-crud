@@ -95,7 +95,7 @@ v16 APIs differ from older releases.
   `apps/api/src/tasks/mappers.ts` is the seam. Do not use `drizzle-zod` for the
   shared schemas.
 - **Nothing above `tasks/repository.ts` knows Drizzle exists.** The interface is
-  in that file; `repository.drizzle.ts` and `repository.memory.ts` implement it,
+  in that file; `repository.drizzle.ts` and `repository.fake.ts` implement it,
   and only `index.ts` and the test harness name one.
 - **Triggers and functions are hand-written migrations.** `drizzle-kit` diffs
   tables only, so `npm run db:generate -- --custom --name <what>` and write the

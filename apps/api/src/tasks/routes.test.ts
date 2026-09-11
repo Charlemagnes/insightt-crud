@@ -12,9 +12,9 @@ import type { Express } from "express";
 import request from "supertest";
 
 import {
-  createMemoryTaskRepository,
+  createFakeTaskRepository,
   type OwnedTask,
-} from "@/tasks/repository.memory";
+} from "@/tasks/repository.fake";
 import {
   aTask,
   asWireTask,
@@ -351,7 +351,7 @@ describe("POST /api/tasks", () => {
     it("keeps the new Task out of another Owner's list", async () => {
       // One store, two Actors: the Task has to be invisible to the second
       // because of who owns it, not because it is somewhere else entirely.
-      const store = createMemoryTaskRepository();
+      const store = createFakeTaskRepository();
       const { app } = harness({ taskRepository: store });
       const { app: theirApp } = harness({
         taskRepository: store,
