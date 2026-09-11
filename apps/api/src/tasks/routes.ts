@@ -221,6 +221,12 @@ function refusalOf(result: Refused, to: TaskStatus): ApiError {
  * a wildcard, anything unquoted — is left to fail the comparison rather than
  * rejected here. No Task is at a Version that cannot be written down, so it can
  * only ever be stale, and `412` is the honest answer.
+ *
+ * `*` is the deliberate deviation in that: RFC 9110 defines it as matching any
+ * existing representation, which would make it a success. An edit that says
+ * "whatever Version it is on, write anyway" is the clobbering this endpoint
+ * exists to refuse, so it is answered `412` like any other tag naming no
+ * Version. PLAN.md §6 records it.
  */
 function requiredVersionOf(req: Request): number {
   const header = req.get("If-Match");

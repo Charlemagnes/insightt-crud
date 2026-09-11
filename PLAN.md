@@ -262,6 +262,15 @@ that names no version this API could have issued is left to fail the comparison
 rather than rejected separately: no task is at a version that cannot be written
 down, so it can only ever be stale.
 
+**`*` is a deliberate deviation from RFC 9110.** The standard defines
+`If-Match: *` as matching any existing representation, which would make it a
+success — an edit that says "whatever version it's on, write anyway". That is
+precisely the clobbering this endpoint exists to refuse, and there is no client
+of this API that wants it: the frontend always holds a real ETag. So `*` fails
+the comparison like any other unreadable tag and is answered `412`. Anything
+that needs an unconditional write can re-read the task and send the version it
+gets back.
+
 **A `PATCH` that would change nothing is refused**, as `422 VALIDATION_FAILED` —
 both the empty body `{}`, which the shared schema's refinement catches, and a
 body whose every field already holds the value it asks for, which needs the task

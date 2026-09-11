@@ -679,8 +679,9 @@ describe("PATCH /api/tasks/:id", () => {
         .set("If-Match", "*")
         .send({ title: "After" });
 
-      // A wildcard names no Version, and no Task is at one that cannot be
-      // written down — so it is stale rather than a bad request.
+      // A deliberate deviation from RFC 9110, which defines `*` as matching
+      // any existing representation. "Whatever Version it is on, write anyway"
+      // is the clobbering this endpoint exists to refuse (PLAN.md §6).
       expect(response.status).toBe(412);
       expect(response.body.error.code).toBe("VERSION_CONFLICT");
     });
