@@ -36,6 +36,16 @@ export function startTask(id: string): Promise<Task> {
 }
 
 /**
+ * Archives a Task: `DONE → ARCHIVED`, the last move it has.
+ *
+ * The Task comes back rather than disappearing. Archived is a Status, not a
+ * soft delete, and the row stays in the list (CONTEXT.md, "Archived").
+ */
+export function archiveTask(id: string): Promise<Task> {
+  return apiFetch(`/api/tasks/${id}/archive`, TaskSchema, TRANSITION_REQUEST);
+}
+
+/**
  * A completed Task, and whether this request is what completed it.
  *
  * `replayed` is not a failure. It means the Task was already Done — a second

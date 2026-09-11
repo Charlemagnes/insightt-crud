@@ -118,6 +118,18 @@ export interface TaskRepository {
   start(query: OwnerScopedTaskQuery): Promise<TransitionResult>;
 
   /**
+   * Moves a `DONE` Task to `ARCHIVED`, through the same guarded statement
+   * `start` uses — the Status it may be moved from again comes from the shared
+   * machine rather than from the caller.
+   *
+   * Archiving is not a delete. The row stays, the Task keeps its completion
+   * time, and it goes on appearing in the Owner's list (CONTEXT.md,
+   * "Archived"). What changes is that `ARCHIVED` is terminal, so this is the
+   * last Transition the Task has.
+   */
+  archive(query: OwnerScopedTaskQuery): Promise<TransitionResult>;
+
+  /**
    * Marks a Task `DONE`, atomically and idempotently.
    *
    * Calling it twice is not an error and does not complete the Task twice: the

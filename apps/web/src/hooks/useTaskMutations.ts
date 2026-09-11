@@ -2,6 +2,7 @@ import type { Task, TaskPage } from "@insightt/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
+  archiveTask,
   createTask,
   markTaskDone,
   startTask,
@@ -49,6 +50,19 @@ export function useMarkTaskDone() {
     run: markTaskDone,
     inFlight: (task) => ({ ...task, status: "DONE" }),
     taskIn: (result) => result.task,
+  });
+}
+
+/**
+ * Archiving a Task. The row shows `ARCHIVED` before the API confirms it, and
+ * stays in the list either way — archiving files a Task away, it does not
+ * remove it, so there is no row to take out optimistically.
+ */
+export function useArchiveTask() {
+  return useTaskRowMutation({
+    run: archiveTask,
+    inFlight: (task) => ({ ...task, status: "ARCHIVED" }),
+    taskIn: (task) => task,
   });
 }
 

@@ -16,15 +16,17 @@ import type {
 } from "@/tasks/repository";
 
 /**
- * The Status a Task must be in to be started, read off the shared machine
- * rather than written here. The SQL guard and the button the UI enables then
- * come from one definition, so neither can offer what the other refuses.
+ * The Status a Task must already be in for each guarded Transition, read off
+ * the shared machine rather than written here. The SQL guard and the button
+ * the UI enables then come from one definition, so neither can offer what the
+ * other refuses.
  *
  * `statusBefore` answers `null` for the Status every Task starts in, which
- * `IN_PROGRESS` is not. Resolving it once at load means a mistake here is a
+ * neither of these is. Resolving them once at load means a mistake here is a
  * crash on boot rather than a Transition that quietly never matches.
  */
 const STARTS_FROM = requireStatusBefore("IN_PROGRESS");
+const ARCHIVES_FROM = requireStatusBefore("ARCHIVED");
 
 function requireStatusBefore(to: TaskStatus): TaskStatus {
   const from = statusBefore(to);
@@ -109,38 +111,14 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
     },
 
     async start(query: OwnerScopedTaskQuery): Promise<TransitionResult> {
-      const { userId, id } = query;
+      return transition(db, query, "IN_PROGRESS", STARTS_FROM);
+    },
 
-      // One guarded statement, so the Transition is atomic without a lock the
-      // application holds: two callers racing to start the same Task both run
-      // this, and only one of them matches a row.
-      const [row] = await db
-        .update(tasks)
-        .set({ status: "IN_PROGRESS", version: sql`${tasks.version} + 1` })
-        .where(
-          and(
-            eq(tasks.id, id),
-            eq(tasks.ownerId, userId),
-            eq(tasks.status, STARTS_FROM),
-          ),
-        )
-        .returning();
-
-      if (row) {
-        return { outcome: "changed", task: toTask(row) };
-      }
-
-      // Nothing matched, and the caller needs to know whether that is a `404`
-      // or a `409`. This read is a second statement, so a Task changing in
-      // between could swap one refusal for the other — which is a refusal
-      // either way, and the Transition still did not happen. Mark Done cannot
-      // accept that much, because there the two answers are a success and a
-      // rejection; that is why it is a function and this is not (PLAN.md §8).
-      const current = await selectOwned(db, query);
-
-      return current
-        ? { outcome: "wrong_status", task: toTask(current) }
-        : { outcome: "not_found" };
+    async archive(query: OwnerScopedTaskQuery): Promise<TransitionResult> {
+      // The same guarded `UPDATE` as Start, and nothing else: no delete, no
+      // flag, no column cleared. `completed_at` is not touched, so an Archived
+      // Task still says when it was finished (CONTEXT.md, "Archived").
+      return transition(db, query, "ARCHIVED", ARCHIVES_FROM);
     },
 
     async markDone({ userId, id }: OwnerScopedTaskQuery): Promise<MarkDoneResult> {
@@ -161,6 +139,51 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
         : { outcome: row.outcome, task: toTask(asTaskRow(row)) };
     },
   };
+}
+
+/**
+ * A Transition as one guarded `UPDATE`, which is every Transition except Mark
+ * Done (PLAN.md §8).
+ *
+ * `from` is passed in already resolved rather than looked up here, so a
+ * Transition whose source Status does not exist fails at module load instead
+ * of at the first request — and the guard is still the machine's answer, never
+ * a Status this file spells.
+ */
+async function transition(
+  db: Database,
+  query: OwnerScopedTaskQuery,
+  to: TaskStatus,
+  from: TaskStatus,
+): Promise<TransitionResult> {
+  const { userId, id } = query;
+
+  // One guarded statement, so the Transition is atomic without a lock the
+  // application holds: two callers racing to move the same Task both run this,
+  // and only one of them matches a row.
+  const [row] = await db
+    .update(tasks)
+    .set({ status: to, version: sql`${tasks.version} + 1` })
+    .where(
+      and(eq(tasks.id, id), eq(tasks.ownerId, userId), eq(tasks.status, from)),
+    )
+    .returning();
+
+  if (row) {
+    return { outcome: "changed", task: toTask(row) };
+  }
+
+  // Nothing matched, and the caller needs to know whether that is a `404` or a
+  // `409`. This read is a second statement, so a Task changing in between could
+  // swap one refusal for the other — which is a refusal either way, and the
+  // Transition still did not happen. Mark Done cannot accept that much, because
+  // there the two answers are a success and a rejection; that is why it is a
+  // function and this is not (PLAN.md §8).
+  const current = await selectOwned(db, query);
+
+  return current
+    ? { outcome: "wrong_status", task: toTask(current) }
+    : { outcome: "not_found" };
 }
 
 /**

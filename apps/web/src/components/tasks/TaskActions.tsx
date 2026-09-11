@@ -1,65 +1,134 @@
 "use client";
 
-import { canTransition, type Task } from "@insightt/shared";
+import { canTransition, type Task, type TaskStatus } from "@insightt/shared";
 import { App, Button, Space } from "antd";
+import type { ButtonProps } from "antd";
 
-import { useMarkTaskDone, useStartTask } from "@/hooks/useTaskMutations";
+import {
+  useArchiveTask,
+  useMarkTaskDone,
+  useStartTask,
+} from "@/hooks/useTaskMutations";
 
 /**
  * The Transitions a row offers.
  *
  * Each control is enabled by `canTransition` — the same predicate the API
- * enforces — so an enabled button cannot produce a `409`. A Task that has
- * nowhere left to go shows both controls disabled rather than an empty cell,
- * because a cell that changes shape per row is harder to scan than one that
- * greys out.
+ * enforces — so an enabled button cannot produce a `409`. Every row shows
+ * every control, disabled where the move is not legal from that Status rather
+ * than hidden: the shape of the lifecycle stays visible, and a cell that
+ * changes shape per row is harder to scan than one that greys out. An
+ * `ARCHIVED` Task shows all three disabled, which is what terminal looks like.
  */
 export function TaskActions({ task }: { task: Task }) {
   const { message } = App.useApp();
   const start = useStartTask();
   const done = useMarkTaskDone();
+  const archive = useArchiveTask();
 
-  async function runStart() {
+  /**
+   * Runs a Transition and says what happened. The success line is whatever the
+   * Transition returns, so Mark Done can report a Replay in its own words
+   * without a second copy of this.
+   *
+   * A refusal the UI believed impossible still reaches the person, in the
+   * API's own words: the disabled buttons are a courtesy, and the browser's
+   * idea of a Task's Status can be a moment out of date.
+   */
+  async function run(
+    transition: () => Promise<string>,
+    failure: string,
+  ): Promise<void> {
     try {
-      await start.mutateAsync(task.id);
-      message.success("Task started");
+      message.success(await transition());
     } catch (error) {
-      message.error(reasonFor(error, "Could not start the task"));
+      message.error(reasonFor(error, failure));
     }
   }
 
-  async function runDone() {
-    try {
+  const runStart = () =>
+    run(async () => {
+      await start.mutateAsync(task.id);
+      return "Task started";
+    }, "Could not start the task");
+
+  const runDone = () =>
+    run(async () => {
       const { replayed } = await done.mutateAsync(task.id);
 
       // A Replay is a success, and saying so plainly is better than a second
-      // "Task marked done" for work the person already finished elsewhere.
-      message.success(replayed ? "That task was already done" : "Task done");
-    } catch (error) {
-      message.error(reasonFor(error, "Could not mark the task done"));
-    }
-  }
+      // "Task done" for work the person already finished elsewhere.
+      return replayed ? "That task was already done" : "Task done";
+    }, "Could not mark the task done");
+
+  const runArchive = () =>
+    run(async () => {
+      await archive.mutateAsync(task.id);
+      return "Task archived";
+    }, "Could not archive the task");
 
   return (
     <Space>
-      <Button
-        size="small"
-        disabled={!canTransition(task.status, "IN_PROGRESS")}
-        loading={start.isPending}
-        onClick={() => void runStart()}
-      >
-        Start
-      </Button>
-      <Button
-        size="small"
+      <TransitionButton
+        task={task}
+        to="IN_PROGRESS"
+        label="Start"
+        pending={start.isPending}
+        onRun={runStart}
+      />
+      <TransitionButton
+        task={task}
+        to="DONE"
+        label="Mark done"
         type="primary"
-        disabled={!canTransition(task.status, "DONE")}
-        loading={done.isPending}
-        onClick={() => void runDone()}
-      >
-        Mark done
-      </Button>
+        pending={done.isPending}
+        onRun={runDone}
+      />
+      <TransitionButton
+        task={task}
+        to="ARCHIVED"
+        label="Archive"
+        pending={archive.isPending}
+        onRun={runArchive}
+      />
     </Space>
+  );
+}
+
+interface TransitionButtonProps {
+  task: Task;
+  /** Where this control would move the Task, which is what decides its state. */
+  to: TaskStatus;
+  label: string;
+  pending: boolean;
+  onRun: () => Promise<void>;
+  type?: ButtonProps["type"];
+}
+
+/**
+ * One Transition control, written once for all of them. Whether it is enabled
+ * is not a prop: it is `canTransition`, asked here, so no control can be
+ * offered for a move the machine refuses — and adding a fourth is a matter of
+ * naming the Status it moves to.
+ */
+function TransitionButton({
+  task,
+  to,
+  label,
+  pending,
+  onRun,
+  type,
+}: TransitionButtonProps) {
+  return (
+    <Button
+      size="small"
+      type={type}
+      disabled={!canTransition(task.status, to)}
+      loading={pending}
+      onClick={() => void onRun()}
+    >
+      {label}
+    </Button>
   );
 }
 

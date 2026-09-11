@@ -77,7 +77,7 @@ export function createTaskRoutes(repository: TaskRepository): Router {
     sendTask(res, created);
   });
 
-  // No request body on either Transition endpoint: the target Status is in the
+  // No request body on any Transition endpoint: the target Status is in the
   // path, so there is nothing to validate and nothing a client can contradict.
   router.post("/:id/start", taskIdValidator, async (req, res) => {
     const result = await repository.start({
@@ -109,6 +109,22 @@ export function createTaskRoutes(repository: TaskRepository): Router {
       res.setHeader("X-Idempotent-Replay", "true");
     }
 
+    sendTask(res, result.task);
+  });
+
+  router.post("/:id/archive", taskIdValidator, async (req, res) => {
+    const result = await repository.archive({
+      userId: actorOf(req).userId,
+      id: taskIdValidator.read(req).params.id,
+    });
+
+    if (result.outcome !== "changed") {
+      throw refusalOf(result, "ARCHIVED");
+    }
+
+    // `200` with the Task, not `204`: the Task is still there. Archiving is a
+    // Transition, not a delete, and the Archived Task goes on appearing in the
+    // list alongside every other one (CONTEXT.md, "Archived").
     sendTask(res, result.task);
   });
 

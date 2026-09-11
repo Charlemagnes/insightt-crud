@@ -72,13 +72,25 @@ function aFunctionRow(
  * missing `owner_id` predicate would pass every one of those tests while
  * leaking every Task in the table.
  */
-function recordingRepository(rows: unknown[] = []) {
+function recordingRepository(rows: unknown[] = [], thenRows?: unknown[]) {
   const statements: Statement[] = [];
 
   const client = {
     query: async (config: { text: string }, values: unknown[]) => {
       statements.push({ text: config.text, values });
-      return { rows, rowCount: rows.length, command: "SELECT", fields: [] };
+
+      // `thenRows` answers the second statement, which is the follow-up read a
+      // guarded Transition makes when its `UPDATE` matched nothing. Without a
+      // way to answer the two differently, the read can only ever come back
+      // empty and the `wrong_status` arm is unreachable.
+      const answer = statements.length === 2 && thenRows ? thenRows : rows;
+
+      return {
+        rows: answer,
+        rowCount: answer.length,
+        command: "SELECT",
+        fields: [],
+      };
     },
   };
 
@@ -91,6 +103,14 @@ function recordingRepository(rows: unknown[] = []) {
 }
 
 const normalise = (text: string) => text.replaceAll(/\s+/g, " ").trim();
+
+/**
+ * The columns an `UPDATE` assigns — what it writes, as opposed to the columns
+ * its `returning` reads back. A test about what a statement leaves alone has
+ * to look here and not at the whole text, where every column is named.
+ */
+const setClauseOf = (text: string) =>
+  normalise(text).replace(/^.*?\bset\b\s*/, "").replace(/\s*\bwhere\b.*$/, "");
 
 describe("createDrizzleTaskRepository", () => {
   describe("list", () => {
@@ -375,6 +395,101 @@ describe("createDrizzleTaskRepository", () => {
       // Owner-scoped like every other read.
       expect(statements[1].values).toEqual([query.id, query.userId, 1]);
       expect(result).toEqual({ outcome: "not_found" });
+    });
+  });
+
+  describe("archive", () => {
+    const query = {
+      userId: "auth0|owner",
+      id: "11111111-1111-4111-8111-111111111111",
+    };
+
+    it("updates under a guard on the id, the Owner and the current Status", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.archive(query);
+
+      const [updated] = statements;
+      expect(normalise(updated.text)).toContain('update "tasks"');
+      expect(normalise(updated.text)).toContain(
+        '("tasks"."id" = $2 and "tasks"."owner_id" = $3 and "tasks"."status" = $4)',
+      );
+      // `statusBefore('ARCHIVED')`, not a Status written into this file.
+      expect(updated.values).toEqual([
+        "ARCHIVED",
+        query.id,
+        query.userId,
+        "DONE",
+      ]);
+    });
+
+    it("raises the Version so a held ETag stops matching", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.archive(query);
+
+      expect(normalise(statements[0].text)).toContain(
+        '"version" = "tasks"."version" + 1',
+      );
+    });
+
+    it("writes the Status and the Version and nothing else", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.archive(query);
+
+      // An update, not a delete, and `completed_at` is nowhere in what it
+      // sets: an Archived Task is still a row and still says when it was
+      // finished (CONTEXT.md, "Archived").
+      expect(normalise(statements[0].text)).not.toContain("delete");
+      expect(setClauseOf(statements[0].text)).toBe(
+        '"status" = $1, "version" = "tasks"."version" + 1',
+      );
+    });
+
+    it("reads nothing more when the update changed a row", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      const result = await repository.archive(query);
+
+      expect(result).toMatchObject({ outcome: "changed" });
+      expect(statements).toHaveLength(1);
+    });
+
+    it("asks why when it changed none", async () => {
+      const { repository, statements } = recordingRepository([]);
+
+      const result = await repository.archive(query);
+
+      expect(statements).toHaveLength(2);
+      expect(statements[1].values).toEqual([query.id, query.userId, 1]);
+      expect(result).toEqual({ outcome: "not_found" });
+    });
+
+    it("reports the Status that refused it when the Task is the Actor's", async () => {
+      // The `UPDATE` matched nothing and the follow-up read found the Task, so
+      // it exists and the Actor owns it — the refusal is the Status, and the
+      // route turns this into `409` rather than `404`.
+      //
+      // `start` shares this code path: both Transitions are one call to
+      // `transition()`, and a second copy of this test would only exercise the
+      // same branch with a different Status.
+      const { repository } = recordingRepository([], [aTaskRow()]);
+
+      const result = await repository.archive(query);
+
+      expect(result).toMatchObject({
+        outcome: "wrong_status",
+        task: { id: query.id, status: "PENDING" },
+      });
+    });
+
+    it("never publishes the Owner on the Task that refused it", async () => {
+      const { repository } = recordingRepository([], [aTaskRow()]);
+
+      const result = await repository.archive(query);
+
+      expect(result).not.toHaveProperty("task.ownerId");
     });
   });
 
