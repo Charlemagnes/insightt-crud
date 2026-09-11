@@ -5,6 +5,13 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  {
+    // Jest reads its config as CommonJS, so `next/jest` has to arrive through
+    // `require`. The rule is right about source files and has nothing to say
+    // about a tooling config the bundler never sees.
+    files: ["jest.config.js"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

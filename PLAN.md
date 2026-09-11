@@ -621,15 +621,32 @@ Two stores, kept off TanStack Query's territory.
 real win: the API client reads the token from the store instead of needing
 hooks, so the `fetch` wrapper stays a plain function.
 
-**`useTaskListStore`** — the list's *view* state: `page`, `pageSize`,
-`statusFilter`, `selectedTaskId`, `editingTaskId`.
+**`useTaskListStore`** — the list's *view* state: `page`, `pageSize`, `status`,
+and `formTarget`, the Task the form is open on.
+
+`formTarget` is one discriminated field — `{ mode: 'create' }`,
+`{ mode: 'edit', taskId }`, or `null` — rather than a selection and an editing
+flag, because creating and editing are the same modal being open and two fields
+could disagree about what it is open on. The edit target is an **id**; the row
+itself is looked up in the query cache, so the store never holds a Task.
 
 **The fetched task array stays in TanStack Query, not in Zustand.** Query
 already caches, invalidates and deduplicates it; duplicating it into a store
 means two caches to reconcile on every mutation, and the replay-`200` path gets
 materially harder. Instead the Zustand params *are* the query key —
-`['tasks', { page, pageSize, statusFilter }]` — so changing a filter refetches
-automatically. Zustand owns "what the user is looking at"; Query owns the rows.
+`['tasks', { page, pageSize, status }]` — so changing a filter refetches
+automatically, with no effect watching the filter to ask for one: a different
+filter is simply a key with nothing cached under it. Zustand owns "what the user
+is looking at"; Query owns the rows.
+
+Changing the filter resets `page` to 1. The page number counts into a result set
+the filter has just replaced, and keeping it lands the person past the end of
+the new one — which reads as a filter that matched nothing.
+
+`['tasks']` itself is never fetched; it is the prefix the pages hang off, and
+what every mutation invalidates. An optimistic write touches only the page on
+screen — whether a Task also belongs on a page cached under another filter is a
+question about counts and ordering that only the server can answer.
 
 **Mutation policy.**
 
@@ -678,6 +695,7 @@ every moment is specified rather than left to the component defaults:
 | List first load | `Table loading={isPending}` |
 | List page change | `placeholderData: keepPreviousData` — the table dims instead of emptying |
 | Zero tasks | `Empty` with a "Create your first task" CTA |
+| Zero tasks under a filter | `Empty` saying the Status has none, offering to clear the filter — the account is not empty, this Status is |
 | Fetch error | `Alert type="error"` with Retry wired to `refetch()` |
 | Mutation in flight | `loading` + `disabled` on the submitting button; `Popconfirm okButtonProps={{ loading }}` |
 | Mutation outcome | `message.success` / `message.error` |

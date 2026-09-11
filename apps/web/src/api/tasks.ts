@@ -4,6 +4,7 @@ import {
   type CreateTaskInput,
   type Task,
   type TaskPage,
+  type TaskStatus,
   type UpdateTaskInput,
 } from "@insightt/shared";
 
@@ -17,9 +18,40 @@ import {
 /** The Transition endpoints take no body — the target Status is in the path. */
 const TRANSITION_REQUEST: RequestInit = { method: "POST" };
 
+/**
+ * Which page of Tasks to read, and how to narrow it.
+ *
+ * The same three values the list view state holds, spelled here rather than
+ * imported from the store: the store decides what the person is looking at, and
+ * this decides what that becomes on the wire. A request shape that imported a
+ * store would put the browser's state management into the API client.
+ */
+export interface TaskListParams {
+  page: number;
+  pageSize: number;
+  /** `null` asks for every Status, Archived included — it sends no filter. */
+  status: TaskStatus | null;
+}
+
 /** One page of the Actor's own Tasks, newest first. */
-export function listTasks(): Promise<TaskPage> {
-  return apiFetch("/api/tasks", TaskPageSchema);
+export function listTasks({
+  page,
+  pageSize,
+  status,
+}: TaskListParams): Promise<TaskPage> {
+  const query = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+
+  // Omitted rather than sent empty: `?status=` is a Status the enum does not
+  // have and would be refused as `422`, where no key at all is the unfiltered
+  // list the API already defaults to.
+  if (status !== null) {
+    query.set("status", status);
+  }
+
+  return apiFetch(`/api/tasks?${query.toString()}`, TaskPageSchema);
 }
 
 /**
