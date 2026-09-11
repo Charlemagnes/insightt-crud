@@ -1,4 +1,4 @@
-import { canTransition, type Task } from "@insightt/shared";
+import { canTransition, type Task, type TaskStatus } from "@insightt/shared";
 
 import { randomUUID } from "node:crypto";
 
@@ -110,20 +110,14 @@ export function createMemoryTaskRepository(
     },
 
     async start(query: OwnerScopedTaskQuery): Promise<TransitionResult> {
-      const task = owned(tasks, query);
+      return transition(tasks, query, "IN_PROGRESS");
+    },
 
-      if (!task) return { outcome: "not_found" };
-      // The same rule the SQL guard is built from, asked the other way round:
-      // there is a Task in hand here, so the question is whether it may move.
-      if (!canTransition(task.status, "IN_PROGRESS")) {
-        return { outcome: "wrong_status", task: withoutOwner(task) };
-      }
-
-      task.status = "IN_PROGRESS";
-      task.version += 1;
-      task.updatedAt = new Date().toISOString();
-
-      return { outcome: "changed", task: withoutOwner(task) };
+    async archive(query: OwnerScopedTaskQuery): Promise<TransitionResult> {
+      // Nothing is cleared and nothing is hidden: the Task keeps its
+      // completion time and stays in the list, exactly as `list` above finds
+      // every other Status.
+      return transition(tasks, query, "ARCHIVED");
     },
 
     async markDone(query: OwnerScopedTaskQuery): Promise<MarkDoneResult> {
@@ -150,6 +144,36 @@ export function createMemoryTaskRepository(
       return { outcome: "completed", task: withoutOwner(task) };
     },
   };
+}
+
+/**
+ * A guarded Transition, the way the Drizzle repository's one `UPDATE` is: the
+ * Task has to exist, be the Actor's, and be somewhere the move is legal.
+ *
+ * Written once for both Transitions that use it, because a second copy is a
+ * second place `version` could stop being raised — and a Version that did not
+ * move would leave a stale `If-Match` matching.
+ */
+function transition(
+  tasks: OwnedTask[],
+  query: OwnerScopedTaskQuery,
+  to: TaskStatus,
+): TransitionResult {
+  const task = owned(tasks, query);
+
+  if (!task) return { outcome: "not_found" };
+
+  // The same rule the SQL guard is built from, asked the other way round:
+  // there is a Task in hand here, so the question is whether it may move.
+  if (!canTransition(task.status, to)) {
+    return { outcome: "wrong_status", task: withoutOwner(task) };
+  }
+
+  task.status = to;
+  task.version += 1;
+  task.updatedAt = new Date().toISOString();
+
+  return { outcome: "changed", task: withoutOwner(task) };
 }
 
 /**

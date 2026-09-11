@@ -112,6 +112,22 @@ export function createTaskRoutes(repository: TaskRepository): Router {
     sendTask(res, result.task);
   });
 
+  router.post("/:id/archive", taskIdValidator, async (req, res) => {
+    const result = await repository.archive({
+      userId: actorOf(req).userId,
+      id: taskIdValidator.read(req).params.id,
+    });
+
+    if (result.outcome !== "changed") {
+      throw refusalOf(result, "ARCHIVED");
+    }
+
+    // `200` with the Task, not `204`: the Task is still there. Archiving is a
+    // Transition, not a delete, and the Archived Task goes on appearing in the
+    // list alongside every other one (CONTEXT.md, "Archived").
+    sendTask(res, result.task);
+  });
+
   return router;
 }
 

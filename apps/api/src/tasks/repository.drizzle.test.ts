@@ -92,6 +92,14 @@ function recordingRepository(rows: unknown[] = []) {
 
 const normalise = (text: string) => text.replaceAll(/\s+/g, " ").trim();
 
+/**
+ * The columns an `UPDATE` assigns — what it writes, as opposed to the columns
+ * its `returning` reads back. A test about what a statement leaves alone has
+ * to look here and not at the whole text, where every column is named.
+ */
+const setClauseOf = (text: string) =>
+  normalise(text).replace(/^.*?\bset\b\s*/, "").replace(/\s*\bwhere\b.*$/, "");
+
 describe("createDrizzleTaskRepository", () => {
   describe("list", () => {
     it("filters on the Owner, with the User ID bound rather than interpolated", async () => {
@@ -373,6 +381,75 @@ describe("createDrizzleTaskRepository", () => {
       expect(statements).toHaveLength(2);
       expect(normalise(statements[1].text)).toContain('select');
       // Owner-scoped like every other read.
+      expect(statements[1].values).toEqual([query.id, query.userId, 1]);
+      expect(result).toEqual({ outcome: "not_found" });
+    });
+  });
+
+  describe("archive", () => {
+    const query = {
+      userId: "auth0|owner",
+      id: "11111111-1111-4111-8111-111111111111",
+    };
+
+    it("updates under a guard on the id, the Owner and the current Status", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.archive(query);
+
+      const [updated] = statements;
+      expect(normalise(updated.text)).toContain('update "tasks"');
+      expect(normalise(updated.text)).toContain(
+        '("tasks"."id" = $2 and "tasks"."owner_id" = $3 and "tasks"."status" = $4)',
+      );
+      // `statusBefore('ARCHIVED')`, not a Status written into this file.
+      expect(updated.values).toEqual([
+        "ARCHIVED",
+        query.id,
+        query.userId,
+        "DONE",
+      ]);
+    });
+
+    it("raises the Version so a held ETag stops matching", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.archive(query);
+
+      expect(normalise(statements[0].text)).toContain(
+        '"version" = "tasks"."version" + 1',
+      );
+    });
+
+    it("writes the Status and the Version and nothing else", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.archive(query);
+
+      // An update, not a delete, and `completed_at` is nowhere in what it
+      // sets: an Archived Task is still a row and still says when it was
+      // finished (CONTEXT.md, "Archived").
+      expect(normalise(statements[0].text)).not.toContain("delete");
+      expect(setClauseOf(statements[0].text)).toBe(
+        '"status" = $1, "version" = "tasks"."version" + 1',
+      );
+    });
+
+    it("reads nothing more when the update changed a row", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      const result = await repository.archive(query);
+
+      expect(result).toMatchObject({ outcome: "changed" });
+      expect(statements).toHaveLength(1);
+    });
+
+    it("asks why when it changed none", async () => {
+      const { repository, statements } = recordingRepository([]);
+
+      const result = await repository.archive(query);
+
+      expect(statements).toHaveLength(2);
       expect(statements[1].values).toEqual([query.id, query.userId, 1]);
       expect(result).toEqual({ outcome: "not_found" });
     });

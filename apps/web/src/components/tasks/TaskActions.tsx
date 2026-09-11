@@ -3,21 +3,27 @@
 import { canTransition, type Task } from "@insightt/shared";
 import { App, Button, Space } from "antd";
 
-import { useMarkTaskDone, useStartTask } from "@/hooks/useTaskMutations";
+import {
+  useArchiveTask,
+  useMarkTaskDone,
+  useStartTask,
+} from "@/hooks/useTaskMutations";
 
 /**
  * The Transitions a row offers.
  *
  * Each control is enabled by `canTransition` — the same predicate the API
- * enforces — so an enabled button cannot produce a `409`. A Task that has
- * nowhere left to go shows both controls disabled rather than an empty cell,
- * because a cell that changes shape per row is harder to scan than one that
- * greys out.
+ * enforces — so an enabled button cannot produce a `409`. Every row shows
+ * every control, disabled where the move is not legal from that Status rather
+ * than hidden: the shape of the lifecycle stays visible, and a cell that
+ * changes shape per row is harder to scan than one that greys out. An
+ * `ARCHIVED` Task shows all three disabled, which is what terminal looks like.
  */
 export function TaskActions({ task }: { task: Task }) {
   const { message } = App.useApp();
   const start = useStartTask();
   const done = useMarkTaskDone();
+  const archive = useArchiveTask();
 
   async function runStart() {
     try {
@@ -40,6 +46,15 @@ export function TaskActions({ task }: { task: Task }) {
     }
   }
 
+  async function runArchive() {
+    try {
+      await archive.mutateAsync(task.id);
+      message.success("Task archived");
+    } catch (error) {
+      message.error(reasonFor(error, "Could not archive the task"));
+    }
+  }
+
   return (
     <Space>
       <Button
@@ -58,6 +73,14 @@ export function TaskActions({ task }: { task: Task }) {
         onClick={() => void runDone()}
       >
         Mark done
+      </Button>
+      <Button
+        size="small"
+        disabled={!canTransition(task.status, "ARCHIVED")}
+        loading={archive.isPending}
+        onClick={() => void runArchive()}
+      >
+        Archive
       </Button>
     </Space>
   );

@@ -1,4 +1,11 @@
-import { TaskPageSchema, TaskSchema } from "@insightt/shared";
+import {
+  canTransition,
+  LIFECYCLE,
+  statusBefore,
+  TaskPageSchema,
+  TaskSchema,
+  type TaskStatus,
+} from "@insightt/shared";
 import request from "supertest";
 
 import {
@@ -552,32 +559,10 @@ describe("POST /api/tasks/:id/start", () => {
     });
   });
 
+  // Which Statuses it refuses to start from is not asserted here: "the Status
+  // machine over HTTP" below walks every Status against every Transition
+  // endpoint, so a sample would only be a subset of what already runs.
   describe("the moves it refuses", () => {
-    it.each(["IN_PROGRESS", "DONE", "ARCHIVED"] as const)(
-      "refuses to start a %s Task as INVALID_TRANSITION",
-      async (status) => {
-        const task = aTask({ status });
-        const { app } = harness({ tasks: [task] });
-
-        const response = await request(app).post(`/api/tasks/${task.id}/start`);
-
-        // 409, not 412: nothing about this is a stale read — the move itself
-        // is not one the lifecycle allows.
-        expect(response.status).toBe(409);
-        expect(response.body.error.code).toBe("INVALID_TRANSITION");
-      },
-    );
-
-    it("leaves the refused Task exactly as it was", async () => {
-      const task = aTask({ status: "DONE", version: 4 });
-      const { app } = harness({ tasks: [task] });
-
-      await request(app).post(`/api/tasks/${task.id}/start`);
-      const after = await request(app).get(`/api/tasks/${task.id}`);
-
-      expect(after.body).toEqual(asWireTask(task));
-    });
-
     it("reports a Task owned by someone else as NOT_FOUND", async () => {
       const theirs = aTask({ ownerId: OTHER_USER_ID });
       const { app } = harness({ tasks: [theirs] });
@@ -728,29 +713,6 @@ describe("POST /api/tasks/:id/done", () => {
   });
 
   describe("the moves it refuses", () => {
-    it.each(["PENDING", "ARCHIVED"] as const)(
-      "refuses to mark a %s Task Done as INVALID_TRANSITION",
-      async (status) => {
-        const task = aTask({ status });
-        const { app } = harness({ tasks: [task] });
-
-        const response = await request(app).post(`/api/tasks/${task.id}/done`);
-
-        expect(response.status).toBe(409);
-        expect(response.body.error.code).toBe("INVALID_TRANSITION");
-      },
-    );
-
-    it("leaves a refused Task uncompleted", async () => {
-      const task = aTask({ status: "PENDING" });
-      const { app } = harness({ tasks: [task] });
-
-      await request(app).post(`/api/tasks/${task.id}/done`);
-      const after = await request(app).get(`/api/tasks/${task.id}`);
-
-      expect(after.body).toEqual(asWireTask(task));
-    });
-
     it("reports another Actor's Task as NOT_FOUND", async () => {
       const theirs = started({ ownerId: OTHER_USER_ID });
       const { app } = harness({ tasks: [theirs] });
@@ -790,4 +752,249 @@ describe("POST /api/tasks/:id/done", () => {
       expect(markDone).not.toHaveBeenCalled();
     });
   });
+});
+
+describe("POST /api/tasks/:id/archive", () => {
+  /** A Task in the one Status that can be archived. */
+  const finished = (overrides: Partial<OwnedTask> = {}) =>
+    aTask({
+      status: "DONE",
+      completedAt: "2026-02-01T00:00:00.000Z",
+      ...overrides,
+    });
+
+  it("moves a DONE Task to ARCHIVED", async () => {
+    const task = finished({ version: 3 });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).post(`/api/tasks/${task.id}/archive`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: task.id,
+      status: "ARCHIVED",
+      version: 4,
+    });
+  });
+
+  it("returns a response the shared schema accepts, with the new ETag", async () => {
+    const task = finished({ version: 3 });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).post(`/api/tasks/${task.id}/archive`);
+
+    expect(() => TaskSchema.parse(response.body)).not.toThrow();
+    expect(response.headers.etag).toBe('"4"');
+  });
+
+  it("keeps the completion time it was archived with", async () => {
+    const task = finished();
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).post(`/api/tasks/${task.id}/archive`);
+
+    // Archiving files the work away; it does not un-finish it, and the record
+    // of when it was finished is the part worth keeping.
+    expect(response.body.completedAt).toBe("2026-02-01T00:00:00.000Z");
+  });
+
+  it("leaves the archived Task in the list", async () => {
+    const task = finished();
+    const { app } = harness({ tasks: [task] });
+
+    await request(app).post(`/api/tasks/${task.id}/archive`);
+    const list = await request(app).get("/api/tasks");
+
+    // Archived is a Status, not a soft delete and not a hidden state
+    // (CONTEXT.md, "Archived"). An unfiltered list still shows it.
+    expect(idsOf(list.body.items)).toEqual([task.id]);
+    expect(list.body.items[0].status).toBe("ARCHIVED");
+    expect(list.body.total).toBe(1);
+  });
+
+  it("takes no request body into account", async () => {
+    const task = finished();
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app)
+      .post(`/api/tasks/${task.id}/archive`)
+      .send({ status: "DONE" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("ARCHIVED");
+  });
+
+  it("scopes the Transition to the Actor", async () => {
+    const archive = jest.fn(async () => ({ outcome: "not_found" }) as const);
+    const { app } = harness({ taskRepository: { archive } });
+
+    await request(app).post(`/api/tasks/${ABSENT_ID}/archive`);
+
+    expect(archive).toHaveBeenCalledWith({
+      userId: TEST_USER_ID,
+      id: ABSENT_ID,
+    });
+  });
+
+  describe("the moves it refuses", () => {
+    it("reports a Task owned by someone else as NOT_FOUND", async () => {
+      const theirs = finished({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const response = await request(app).post(
+        `/api/tasks/${theirs.id}/archive`,
+      );
+
+      // 404 and not 409: a Task the Actor cannot see has no Status to refuse.
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe("NOT_FOUND");
+    });
+
+    it("leaves another Actor's Task untouched", async () => {
+      const theirs = finished({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+      const { app: theirApp } = harness({
+        tasks: [theirs],
+        requireAuth: authenticateAs(OTHER_USER_ID),
+      });
+
+      await request(app).post(`/api/tasks/${theirs.id}/archive`);
+      const after = await request(theirApp).get(`/api/tasks/${theirs.id}`);
+
+      expect(after.body.status).toBe("DONE");
+    });
+
+    it("answers identically for a Task that exists elsewhere and one that does not", async () => {
+      const theirs = finished({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const [notOwned, absent] = await Promise.all([
+        request(app).post(`/api/tasks/${theirs.id}/archive`),
+        request(app).post(`/api/tasks/${ABSENT_ID}/archive`),
+      ]);
+
+      expect(notOwned.status).toBe(absent.status);
+      expect(notOwned.body).toEqual(absent.body);
+    });
+
+    it("reports a malformed id as NOT_FOUND without reaching the repository", async () => {
+      const archive = jest.fn(async () => ({ outcome: "not_found" }) as const);
+      const { app } = harness({ taskRepository: { archive } });
+
+      const response = await request(app).post(
+        `/api/tasks/${MALFORMED_ID}/archive`,
+      );
+
+      expect(response.status).toBe(404);
+      expect(archive).not.toHaveBeenCalled();
+    });
+  });
+});
+
+/**
+ * Each Transition endpoint, and the Status the machine calls its destination.
+ * The table below is built from this and `LIFECYCLE`, so it covers every
+ * Transition the API can be asked for rather than the ones anyone thought to
+ * list — add a Status to the lifecycle and the missing cases appear on their
+ * own.
+ */
+const TRANSITION_ENDPOINTS = [
+  { path: "start", to: "IN_PROGRESS" },
+  { path: "done", to: "DONE" },
+  { path: "archive", to: "ARCHIVED" },
+] as const satisfies readonly { path: string; to: TaskStatus }[];
+
+/** Every Status a Task could be in, against every Transition it could be asked to make. */
+const everyMove = TRANSITION_ENDPOINTS.flatMap(({ path, to }) =>
+  LIFECYCLE.map((from) => ({ path, to, from })),
+);
+
+/**
+ * Marking an already-`DONE` Task Done. Not an illegal move and not a legal
+ * one: nothing is written and the request still succeeds (CONTEXT.md,
+ * "Replay"). It is asserted in the `/done` block above, and excluded here.
+ */
+const isReplay = ({ from, to }: { from: TaskStatus; to: TaskStatus }) =>
+  from === "DONE" && to === "DONE";
+
+const legalMoves = everyMove.filter(({ from, to }) => canTransition(from, to));
+const illegalMoves = everyMove.filter(
+  (move) => !canTransition(move.from, move.to) && !isReplay(move),
+);
+
+describe("the Status machine over HTTP", () => {
+  it("exposes one endpoint per Transition the machine allows", () => {
+    // Every Status something transitions into — which is every Status except
+    // the one Tasks start in — has an endpoint that moves a Task there. Add a
+    // Status to the lifecycle without a route and this fails.
+    expect(TRANSITION_ENDPOINTS.map(({ to }) => to)).toEqual(
+      LIFECYCLE.filter((status) => statusBefore(status) !== null),
+    );
+  });
+
+  it("tries every Status against every endpoint", () => {
+    // The claim the table below rests on: this is the whole machine, not a
+    // sample of it.
+    expect(everyMove).toHaveLength(
+      LIFECYCLE.length * TRANSITION_ENDPOINTS.length,
+    );
+    expect(legalMoves.length + illegalMoves.length + 1).toBe(everyMove.length);
+  });
+
+  it.each(legalMoves)("moves a $from Task to $to", async ({ from, path, to }) => {
+    const task = aTask({ status: from });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).post(`/api/tasks/${task.id}/${path}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe(to);
+  });
+
+  it.each(illegalMoves)(
+    "refuses $from → $to as INVALID_TRANSITION",
+    async ({ from, path }) => {
+      const task = aTask({ status: from });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await request(app).post(`/api/tasks/${task.id}/${path}`);
+
+      // 409, not 412: nothing about this is a stale read — the move itself is
+      // not one the lifecycle allows. Skipping a step, reverting, and asking
+      // anything at all of an ARCHIVED Task all arrive here.
+      expect(response.status).toBe(409);
+      expect(response.body.error.code).toBe("INVALID_TRANSITION");
+    },
+  );
+
+  it.each(illegalMoves)(
+    "leaves a $from Task refused $to exactly as it was",
+    async ({ from, path }) => {
+      const task = aTask({ status: from, version: 4 });
+      const { app } = harness({ tasks: [task] });
+
+      await request(app).post(`/api/tasks/${task.id}/${path}`);
+      const after = await request(app).get(`/api/tasks/${task.id}`);
+
+      expect(after.body).toEqual(asWireTask(task));
+    },
+  );
+
+  it.each(everyMove)(
+    "reports another Actor's $from Task as NOT_FOUND on $path",
+    async ({ from, path }) => {
+      const theirs = aTask({ status: from, ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const response = await request(app).post(
+        `/api/tasks/${theirs.id}/${path}`,
+      );
+
+      // Not owned is not found, whatever Status it is in — otherwise a 409
+      // would confirm that someone else's Task exists and say where it is in
+      // its lifecycle.
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe("NOT_FOUND");
+    },
+  );
 });

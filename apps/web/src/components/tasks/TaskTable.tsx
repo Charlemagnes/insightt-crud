@@ -34,7 +34,9 @@ const columns: NonNullable<TableProps<Task>["columns"]> = [
   {
     title: "Actions",
     key: "actions",
-    width: 200,
+    // Wide enough for all three Transition controls, which every row shows —
+    // the disabled ones take up the same space as the enabled ones.
+    width: 280,
     // The whole Task, not one field: which Transitions a row offers is a
     // question about its Status, and the mutations address it by id.
     render: (_: unknown, task: Task) => <TaskActions task={task} />,
