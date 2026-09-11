@@ -18,14 +18,18 @@ const nextJest = require("next/jest");
  * CJS twin arrives as a syntax error naming the *test* file rather than the
  * package, which is what makes this a landmine rather than a typo.
  *
- * `require(esm)` lands in Node 24.9 and makes the list unnecessary; the engine
- * floor is lower than that, so it stays.
+ * Node's own `require(esm)` does not retire this list. It is unflagged from
+ * Node 22.12, well under what this repo runs, but Jest resolves `node_modules`
+ * through its own module registry rather than Node's `require`, so the
+ * interoperability Node gained never reaches the code under test.
+ *
+ * Scopes as well as packages, because several of these publish under one:
+ * matching the scope covers every package MSW pulls from it.
  */
 const ESM_ONLY = [
   "msw",
   "@mswjs",
   "@open-draft",
-  "@bundled-es-modules",
   "rettime",
   "until-async",
   "outvariant",
@@ -43,11 +47,19 @@ const ESM_ONLY = [
  * `@insightt/shared` is in there. Replacing them wholesale drops it, and the
  * suite goes on passing only because a workspace symlink resolves the package
  * to a path outside `node_modules`, where the pattern never applies.
+ *
+ * The exception list is what `(?!(` opens, so a pattern without one has
+ * nowhere to put it. `next/jest` emits exactly that — a bare `/node_modules/`
+ * — when `transpilePackages` is empty, which is why the caller below counts
+ * the injections instead of trusting them: a silent no-op here comes back as a
+ * syntax error naming a test file, the landmine `ESM_ONLY` exists to defuse.
  */
 function alsoTransform(pattern) {
-  return pattern.includes("node_modules")
-    ? pattern.replace("(?!(", `(?!(${ESM_ONLY.join("|")}|`)
-    : pattern;
+  if (!pattern.includes("node_modules") || !pattern.includes("(?!(")) {
+    return pattern;
+  }
+
+  return pattern.replace("(?!(", `(?!(${ESM_ONLY.join("|")}|`);
 }
 
 const createConfig = nextJest({ dir: "./" })({
@@ -68,9 +80,16 @@ const createConfig = nextJest({ dir: "./" })({
 // overwritten. It has to be edited into the resolved patterns afterwards.
 module.exports = async () => {
   const resolved = await createConfig();
+  const patterns = resolved.transformIgnorePatterns.map(alsoTransform);
 
-  return {
-    ...resolved,
-    transformIgnorePatterns: resolved.transformIgnorePatterns.map(alsoTransform),
-  };
+  if (patterns.every((pattern, i) => pattern === resolved.transformIgnorePatterns[i])) {
+    throw new Error(
+      "jest.config.js: transformIgnorePatterns took none of the ESM_ONLY " +
+        "exceptions. `transpilePackages` in next.config.ts is the usual cause — " +
+        "without it `next/jest` emits no exception list to inject into. See the " +
+        "comment on `alsoTransform`.",
+    );
+  }
+
+  return { ...resolved, transformIgnorePatterns: patterns };
 };

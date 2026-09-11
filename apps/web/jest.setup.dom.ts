@@ -38,9 +38,14 @@ Object.defineProperty(window, "matchMedia", {
  * only logs it, so the tests still pass; the cost is a hundred lines of stack
  * per render, which is how a real error goes unnoticed.
  *
- * Dropping the second argument is the honest answer: there are no pseudo-
+ * Swallowing the second argument is the honest answer: there are no pseudo-
  * element styles in a DOM with no stylesheets, so the measurement is zero
  * either way.
+ *
+ * Declaring one parameter narrows nothing: `getComputedStyle`'s type comes from
+ * `lib.dom`, and a function of fewer parameters is assignable to it, so callers
+ * may still pass a pseudo-element and still typecheck. It is only ignored at
+ * run time, which is the whole point.
  */
 const computedStyle = window.getComputedStyle.bind(window);
 

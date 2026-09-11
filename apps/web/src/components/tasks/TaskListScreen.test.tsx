@@ -26,9 +26,15 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-/** One row, found by the title in its first cell. */
+/**
+ * One row, found by the title in its first cell.
+ *
+ * The title is matched as text rather than compiled into a `RegExp`, so a
+ * title containing a metacharacter picks its own row instead of quietly
+ * becoming a pattern that matches several or none.
+ */
 function rowFor(title: string): HTMLElement {
-  return screen.getByRole("row", { name: new RegExp(title) });
+  return screen.getByRole("row", { name: (name) => name.includes(title) });
 }
 
 /** A control inside one row, so two rows' Start buttons are never confused. */
@@ -74,6 +80,12 @@ describe("the task list", () => {
    * because the Task *is* Done and the list is refetched once the mutation
    * settles: what a mishandled Replay breaks is what the person is told, not
    * where the Task ends up.
+   *
+   * This covers the reading half only. MSW applies no CORS, so the header is
+   * always legible here, and the other way to break Replay — dropping
+   * `X-Idempotent-Replay` from `exposedHeaders`, after which a real browser
+   * hides it (`apps/web/src/api/tasks.ts`) — is invisible to this test. That
+   * one is `apps/api/src/app.test.ts`'s, where the CORS config actually lives.
    */
   it("treats a Replay as success, not an error", async () => {
     const task = aTask({ title: "Ship the API", status: "IN_PROGRESS" });
@@ -129,10 +141,14 @@ describe("the task list", () => {
 
     for (const [title, status] of rows) {
       for (const label of ["Edit", "Start", "Mark done", "Archive"]) {
-        expect(buttonIn(title, label)).toHaveProperty(
-          "disabled",
-          !legal[status].includes(label),
-        );
+        // `toBeDisabled`, not the `disabled` property: it is the state assistive
+        // technology reports, so a control turned off with `aria-disabled` alone
+        // would still have to say so.
+        if (legal[status].includes(label)) {
+          expect(buttonIn(title, label)).toBeEnabled();
+        } else {
+          expect(buttonIn(title, label)).toBeDisabled();
+        }
       }
 
       // Deletion is legal from every Status, `ARCHIVED` included (PLAN.md §7).

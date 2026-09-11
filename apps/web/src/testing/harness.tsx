@@ -3,10 +3,19 @@
  * builds the real screen — real components, real TanStack Query cache, real
  * Zustand stores — with nothing behind it but an in-memory API (PLAN.md §15).
  *
- * Only HTTP is faked. The one thing besides the network that the screen cannot
- * reach under jsdom is Auth0, and it is not mocked either: the session store is
- * *seeded*, which is the same write `SessionMirror` makes when Auth0 resolves.
- * Signing in for real is the Cypress spec's job.
+ * HTTP is the only thing faked: MSW answers the requests, and nothing else is
+ * stubbed, spied on, or swapped for a double.
+ *
+ * Auth0 is the one thing left out rather than faked. There is no
+ * `Auth0Provider` here, so the session store is *seeded* instead — the same
+ * write `SessionMirror` makes once Auth0 resolves — and everything that reads
+ * the store, the API client's token among it, behaves as it does signed in.
+ * What does not is anything reading `useAuth0()` directly: `AppHeader` renders
+ * its name blank and its Logout button is inert, because auth0-react hands an
+ * unprovided consumer a stub. That is a header this test has no assertion
+ * about, and the alternative — a fake `Auth0Provider` — would fake something
+ * the Task list does not use. The header signed in for real is the Cypress
+ * spec's job (PLAN.md §15, test 3).
  */
 import { TASK_PAGE, type Task, type TaskPage } from "@insightt/shared";
 import { render, type RenderResult } from "@testing-library/react";

@@ -776,13 +776,17 @@ project.
 real Zustand stores, the real components — and MSW the only thing standing in.
 It asserts the rows the API returned, that marking an `IN_PROGRESS` Task Done
 re-renders it as Done, that a replayed `200` is handled as success rather than
-surfaced as an error, and that a control the row's Status makes illegal is
-disabled.
+surfaced as an error, and that every control a row's Status makes illegal is
+rendered disabled.
 
-Auth0 is the one thing besides the network that the screen cannot reach under
-jsdom, and it is not mocked either: the test renders the screen rather than the
-page, and seeds the session store with the same write `SessionMirror` makes.
-Signing in for real is test 3's job.
+Auth0 is left out rather than mocked. The test renders the screen rather than
+the page, and seeds the session store with the same write `SessionMirror`
+makes, so everything reading the store — the API client's token included —
+behaves as it does signed in. What is left un-rendered is `AppHeader`, which
+calls `useAuth0()` directly and so draws a blank name and an inert Logout
+button: no assertion here concerns it, and a fake `Auth0Provider` would be
+faking something the Task list itself never touches. Signing in for real is
+test 3's job.
 
 **3. E2E — Cypress**
 The login flow, using the Regular Web Application from §10 with
@@ -810,8 +814,10 @@ it, which means ESM, and ts-jest on ESM is the tarpit §2 avoids in `apps/api`.
 - Several of MSW's dependencies publish ESM and nothing else. Jest loads
   `node_modules` as CommonJS without transforming it, so an `.mjs` with no CJS
   twin arrives as a syntax error naming the *test* file — `jest.config.js` names
-  those packages as exceptions to `transformIgnorePatterns`. `require(esm)`
-  lands in Node 24.9 and makes the list unnecessary; the engine floor is lower.
+  those packages as exceptions to `transformIgnorePatterns`. Node's own
+  `require(esm)` does not retire the list: Jest resolves `node_modules` through
+  its own module registry rather than Node's `require`, so the interoperability
+  Node gained never reaches the code under test.
 
 Two smaller ones, both in `jest.setup.dom.ts`: antd calls `matchMedia`, which
 jsdom leaves undefined, and `getComputedStyle` with a pseudo-element, which
