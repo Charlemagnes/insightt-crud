@@ -86,8 +86,7 @@ export interface TaskListResult {
  * Task that does not exist are the same answer and neither has one to give.
  */
 export type Refused =
-  | { outcome: "wrong_status"; task: Task }
-  | { outcome: "not_found" };
+  { outcome: "wrong_status"; task: Task } | { outcome: "not_found" };
 
 /** What a guarded Transition did. */
 export type TransitionResult = { outcome: "changed"; task: Task } | Refused;

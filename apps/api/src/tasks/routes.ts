@@ -17,16 +17,15 @@ import { Router } from "express";
 import { actorOf } from "@/middleware/auth";
 import { ApiError } from "@/middleware/errors";
 import { validate } from "@/middleware/validate";
-import type {
-  Refused,
-  TaskRepository,
-  UpdateResult,
-} from "@/tasks/repository";
+import type { Refused, TaskRepository, UpdateResult } from "@/tasks/repository";
 
 const listValidator = validate({ query: TaskListQuery });
 const taskIdValidator = validate({ params: TaskIdParam });
 const createValidator = validate({ body: CreateTaskInput });
-const updateValidator = validate({ params: TaskIdParam, body: UpdateTaskInput });
+const updateValidator = validate({
+  params: TaskIdParam,
+  body: UpdateTaskInput,
+});
 
 /**
  * The Task routes, mounted behind the auth stack — so `actorOf` always has an

@@ -96,7 +96,10 @@ describe("GET /api/tasks", () => {
     it("orders Tasks sharing a creation time deterministically", async () => {
       const sameInstant = "2026-01-01T00:00:00.000Z";
       const { app } = harness({
-        tasks: [aTask({ createdAt: sameInstant }), aTask({ createdAt: sameInstant })],
+        tasks: [
+          aTask({ createdAt: sameInstant }),
+          aTask({ createdAt: sameInstant }),
+        ],
       });
 
       const [first, second] = await Promise.all([
@@ -122,7 +125,9 @@ describe("GET /api/tasks", () => {
     });
 
     it("pages, reporting the total across every page", async () => {
-      const { app } = harness({ tasks: Array.from({ length: 5 }, () => aTask()) });
+      const { app } = harness({
+        tasks: Array.from({ length: 5 }, () => aTask()),
+      });
 
       const response = await request(app).get("/api/tasks?page=2&pageSize=2");
 
@@ -389,7 +394,9 @@ describe("POST /api/tasks", () => {
     it("rejects a title that is only whitespace", async () => {
       const { app } = harness();
 
-      const response = await request(app).post("/api/tasks").send({ title: "   " });
+      const response = await request(app)
+        .post("/api/tasks")
+        .send({ title: "   " });
 
       expect(response.status).toBe(422);
     });
@@ -407,7 +414,9 @@ describe("POST /api/tasks", () => {
     it("names the offending field in the details", async () => {
       const { app } = harness();
 
-      const response = await request(app).post("/api/tasks").send({ title: "" });
+      const response = await request(app)
+        .post("/api/tasks")
+        .send({ title: "" });
 
       // The create form reads these issues to mark the field that failed, so
       // the paths travelling intact is the contract, not an implementation
@@ -638,7 +647,9 @@ describe("PATCH /api/tasks/:id", () => {
       const task = aTask({ title: "Before" });
       const { app } = harness({ tasks: [task] });
 
-      await request(app).patch(`/api/tasks/${task.id}`).send({ title: "After" });
+      await request(app)
+        .patch(`/api/tasks/${task.id}`)
+        .send({ title: "After" });
       const after = await request(app).get(`/api/tasks/${task.id}`);
 
       expect(after.body).toEqual(asWireTask(task));
@@ -863,7 +874,9 @@ describe("PATCH /api/tasks/:id", () => {
     it("tries every field against every Status", () => {
       // The claim the table below rests on: this is the whole whitelist, not a
       // sample of it.
-      expect(everyField).toHaveLength(LIFECYCLE.length * EDITABLE_FIELDS.length);
+      expect(everyField).toHaveLength(
+        LIFECYCLE.length * EDITABLE_FIELDS.length,
+      );
     });
 
     it.each(everyField)(
@@ -1629,15 +1642,18 @@ describe("the Status machine over HTTP", () => {
     expect(legalMoves.length + illegalMoves.length + 1).toBe(everyMove.length);
   });
 
-  it.each(legalMoves)("moves a $from Task to $to", async ({ from, path, to }) => {
-    const task = aTask({ status: from });
-    const { app } = harness({ tasks: [task] });
+  it.each(legalMoves)(
+    "moves a $from Task to $to",
+    async ({ from, path, to }) => {
+      const task = aTask({ status: from });
+      const { app } = harness({ tasks: [task] });
 
-    const response = await request(app).post(`/api/tasks/${task.id}/${path}`);
+      const response = await request(app).post(`/api/tasks/${task.id}/${path}`);
 
-    expect(response.status).toBe(200);
-    expect(response.body.status).toBe(to);
-  });
+      expect(response.status).toBe(200);
+      expect(response.body.status).toBe(to);
+    },
+  );
 
   it.each(illegalMoves)(
     "refuses $from → $to as INVALID_TRANSITION",

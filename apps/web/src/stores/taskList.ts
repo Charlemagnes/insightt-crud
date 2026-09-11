@@ -14,9 +14,7 @@ import { create } from "zustand";
  * remember rather than against the row the person is looking at.
  */
 export type TaskFormTarget =
-  | { mode: "create" }
-  | { mode: "edit"; taskId: string }
-  | null;
+  { mode: "create" } | { mode: "edit"; taskId: string } | null;
 
 /**
  * What the person is looking at: which page, how large, narrowed to which

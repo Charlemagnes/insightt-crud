@@ -232,9 +232,7 @@ describe("UpdateTaskInput", () => {
     });
 
     it("rejects a mistyped field name", () => {
-      expect(
-        UpdateTaskInput.safeParse({ titel: "oops" }).success,
-      ).toBe(false);
+      expect(UpdateTaskInput.safeParse({ titel: "oops" }).success).toBe(false);
     });
 
     it("rejects the Version, which travels as a header and not a field", () => {
@@ -305,9 +303,9 @@ describe("TaskListQuery", () => {
     });
 
     it("accepts a page size at the cap", () => {
-      expect(TaskListQuery.parse({ pageSize: TASK_PAGE.maxSize }).pageSize).toBe(
-        TASK_PAGE.maxSize,
-      );
+      expect(
+        TaskListQuery.parse({ pageSize: TASK_PAGE.maxSize }).pageSize,
+      ).toBe(TASK_PAGE.maxSize);
     });
 
     it("rejects a page size beyond the cap rather than clamping it", () => {
@@ -333,7 +331,9 @@ describe("TaskListQuery", () => {
     });
 
     it("rejects a Status outside the lifecycle", () => {
-      expect(TaskListQuery.safeParse({ status: "BLOCKED" }).success).toBe(false);
+      expect(TaskListQuery.safeParse({ status: "BLOCKED" }).success).toBe(
+        false,
+      );
     });
 
     it("rejects a Status in the wrong case, rather than guessing", () => {
@@ -345,9 +345,9 @@ describe("TaskListQuery", () => {
     // The paginator offers these sizes; the schema is what rejects one the API
     // will not serve. These hold the two together.
     it("says where the page-size rule actually rejects", () => {
-      expect(TaskListQuery.safeParse({ pageSize: TASK_PAGE.maxSize }).success).toBe(
-        true,
-      );
+      expect(
+        TaskListQuery.safeParse({ pageSize: TASK_PAGE.maxSize }).success,
+      ).toBe(true);
       expect(
         TaskListQuery.safeParse({ pageSize: TASK_PAGE.maxSize + 1 }).success,
       ).toBe(false);
@@ -380,6 +380,8 @@ describe("TaskPageSchema", () => {
   });
 
   it("rejects a negative total", () => {
-    expect(TaskPageSchema.safeParse({ ...page, total: -1 }).success).toBe(false);
+    expect(TaskPageSchema.safeParse({ ...page, total: -1 }).success).toBe(
+      false,
+    );
   });
 });

@@ -92,7 +92,11 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
 
   return (
     <Space>
-      <Button size="small" disabled={!canEditAnything(task.status)} onClick={() => onEdit(task)}>
+      <Button
+        size="small"
+        disabled={!canEditAnything(task.status)}
+        onClick={() => onEdit(task)}
+      >
         Edit
       </Button>
       <TransitionButton

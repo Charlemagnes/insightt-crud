@@ -23,8 +23,15 @@ const { Content } = Layout;
  * — which is what the Cypress spec is for.
  */
 export function TaskListScreen() {
-  const { data, isFetched, isPending, isPlaceholderData, isError, error, refetch } =
-    useTasks();
+  const {
+    data,
+    isFetched,
+    isPending,
+    isPlaceholderData,
+    isError,
+    error,
+    refetch,
+  } = useTasks();
   const status = useTaskListStore((state) => state.status);
   const filterByStatus = useTaskListStore((state) => state.filterByStatus);
   const formTarget = useTaskListStore((state) => state.formTarget);

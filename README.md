@@ -6,10 +6,10 @@ see, and move each one through a fixed forward-only lifecycle —
 
 Three workspaces in one npm monorepo:
 
-| Workspace | What it is |
-|---|---|
-| `apps/web` | Next.js 16 SPA — React 19, Ant Design v6, TanStack Query, Zustand |
-| `apps/api` | Express 5 REST API — TypeScript, Drizzle, Supabase Postgres |
+| Workspace         | What it is                                                              |
+| ----------------- | ----------------------------------------------------------------------- |
+| `apps/web`        | Next.js 16 SPA — React 19, Ant Design v6, TanStack Query, Zustand       |
+| `apps/api`        | Express 5 REST API — TypeScript, Drizzle, Supabase Postgres             |
 | `packages/shared` | `@insightt/shared` — the Zod schemas and Status rules both sides import |
 
 Both apps depend on `packages/shared`; neither depends on the other.
@@ -60,12 +60,12 @@ away.
 Every file below is gitignored, and `setup-auth0.sh` writes all of them.
 `.env.example` files ship with the repo for the two the apps read.
 
-| File | Variables |
-|---|---|
-| `apps/api/.env` | `DATABASE_URL` (Supavisor **session-mode** string), `DATABASE_CA_CERT` (optional), `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `PORT`, `WEB_ORIGIN`, `NODE_ENV` (optional) |
-| `apps/web/.env.local` | `NEXT_PUBLIC_AUTH0_DOMAIN`, `NEXT_PUBLIC_AUTH0_CLIENT_ID`, `NEXT_PUBLIC_AUTH0_AUDIENCE`, `NEXT_PUBLIC_API_URL` |
-| `cypress.env.json` | `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_REALM`, `AUTH0_SPA_CLIENT_ID`, `AUTH0_CYPRESS_CLIENT_ID`, `AUTH0_CYPRESS_CLIENT_SECRET`, `AUTH0_TEST_EMAIL`, `AUTH0_TEST_PASSWORD` |
-| `.env` (root) | The wizard's own record of what you answered, so a re-run can offer your previous values as defaults. Nothing reads it at runtime. |
+| File                  | Variables                                                                                                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api/.env`       | `DATABASE_URL` (Supavisor **session-mode** string), `DATABASE_CA_CERT` (optional), `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `PORT`, `WEB_ORIGIN`, `NODE_ENV` (optional)            |
+| `apps/web/.env.local` | `NEXT_PUBLIC_AUTH0_DOMAIN`, `NEXT_PUBLIC_AUTH0_CLIENT_ID`, `NEXT_PUBLIC_AUTH0_AUDIENCE`, `NEXT_PUBLIC_API_URL`                                                              |
+| `cypress.env.json`    | `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_REALM`, `AUTH0_SPA_CLIENT_ID`, `AUTH0_CYPRESS_CLIENT_ID`, `AUTH0_CYPRESS_CLIENT_SECRET`, `AUTH0_TEST_EMAIL`, `AUTH0_TEST_PASSWORD` |
+| `.env` (root)         | The wizard's own record of what you answered, so a re-run can offer your previous values as defaults. Nothing reads it at runtime.                                          |
 
 Two spellings are worth singling out, because both fail late and obscurely:
 
@@ -80,10 +80,32 @@ Two spellings are worth singling out, because both fail late and obscurely:
   the SPA application; Cypress uses a Regular Web Application, because Auth0
   does not offer the Password grant on SPA clients.
 
+### The pre-commit hook
+
+`npm install` installs a Husky hook that runs four things, cheapest first:
+
+1. **Prettier** over the staged files, via lint-staged, which re-stages what it
+   changed. Formatting is fixed rather than reported.
+2. **`npm run docs:api`**, refusing the commit if `docs/openapi.json` was
+   stale. It refuses rather than staging the file itself, so a commit stays
+   what you staged.
+3. **`npm run typecheck`** across every workspace.
+4. **`npm run test`** — the whole Jest suite, around twenty seconds.
+
+`git commit --no-verify` skips all four.
+
+Prettier's config is two keys, and one of them is only there to anchor the
+config search: Prettier walks _up_ out of the repo looking for a `.prettierrc`,
+so without a local one it can pick up a stray config from somewhere above the
+checkout and reformat the whole repo to a style nobody here chose. Generated
+files — `docs/openapi.json`, the drizzle snapshots, the lockfile — are in
+`.prettierignore`, since formatting them would fight whatever writes them.
+
 ### Commands
 
 ```bash
 npm run dev        # both servers, concurrently
+npm run format     # prettier --write over the repo
 npm run build      # production build; type-checks every workspace first
 npm run typecheck  # the same check plus cypress/, which is not a workspace
 npm run lint
@@ -101,16 +123,16 @@ npm run db:seed -- '<user id>'
 
 JSON REST, every route behind a valid Auth0 access token.
 
-| Method | Path | Purpose | Success |
-|---|---|---|---|
-| `GET` | `/api/tasks` | Owner-scoped list; `page`, `pageSize`, `status` | `200` + `{ items, page, pageSize, total }` |
-| `GET` | `/api/tasks/:id` | One Task | `200` + `Task` + `ETag` |
-| `POST` | `/api/tasks` | Create, always `PENDING` | `201` + `Task` |
-| `PATCH` | `/api/tasks/:id` | Edit title/description; requires `If-Match` | `200` + `Task` |
-| `POST` | `/api/tasks/:id/start` | `PENDING → IN_PROGRESS` | `200` + `Task` |
-| `POST` | `/api/tasks/:id/done` | `IN_PROGRESS → DONE`, idempotent | `200` + `Task` |
-| `POST` | `/api/tasks/:id/archive` | `DONE → ARCHIVED` | `200` + `Task` |
-| `DELETE` | `/api/tasks/:id` | Delete, legal from any Status | `204` |
+| Method   | Path                     | Purpose                                         | Success                                    |
+| -------- | ------------------------ | ----------------------------------------------- | ------------------------------------------ |
+| `GET`    | `/api/tasks`             | Owner-scoped list; `page`, `pageSize`, `status` | `200` + `{ items, page, pageSize, total }` |
+| `GET`    | `/api/tasks/:id`         | One Task                                        | `200` + `Task` + `ETag`                    |
+| `POST`   | `/api/tasks`             | Create, always `PENDING`                        | `201` + `Task`                             |
+| `PATCH`  | `/api/tasks/:id`         | Edit title/description; requires `If-Match`     | `200` + `Task`                             |
+| `POST`   | `/api/tasks/:id/start`   | `PENDING → IN_PROGRESS`                         | `200` + `Task`                             |
+| `POST`   | `/api/tasks/:id/done`    | `IN_PROGRESS → DONE`, idempotent                | `200` + `Task`                             |
+| `POST`   | `/api/tasks/:id/archive` | `DONE → ARCHIVED`                               | `200` + `Task`                             |
+| `DELETE` | `/api/tasks/:id`         | Delete, legal from any Status                   | `204`                                      |
 
 Transitions are dedicated endpoints rather than `PATCH { status }`, and
 `status` is absent from every input schema. That is what keeps the Postgres
@@ -135,16 +157,13 @@ it cannot drift from what the API actually accepts. Regenerate it with
 
 What Zod cannot know — which routes exist, which headers they require, which
 error codes each can answer with — is written by hand in
-`apps/api/src/docs/openapi.ts`, and `docs/openapi.test.ts` holds *that* half
+`apps/api/src/docs/openapi.ts`, and `docs/openapi.test.ts` holds _that_ half
 against the real Express router: adding a route without documenting it fails a
 test. So does leaving the checked-in file stale, which is the one way a
 generated document can still be wrong.
 
-A Husky pre-commit hook (`.husky/pre-commit`) catches that second one earlier,
-at the moment it would enter history: it regenerates the file and refuses the
-commit if that changed anything. It refuses rather than staging the file
-itself, so a commit stays what you staged. `npm install` installs the hook;
-`git commit --no-verify` skips it.
+The [pre-commit hook](#the-pre-commit-hook) catches that second one earlier,
+at the moment it would enter history.
 
 With the API running, the same document is served at
 <http://localhost:4000/api/docs/openapi.json>, with Swagger UI over it at
@@ -194,14 +213,14 @@ Postgres function `mark_task_done()` is two of the three at once.
 
 The deciding factor is **where the race has to be resolved**. Marking Done must
 be atomic and idempotent, and when the conditional `UPDATE` changes zero rows
-the caller needs to know *why* — a question that has to be asked inside the same
+the caller needs to know _why_ — a question that has to be asked inside the same
 transaction. Outside it, the window in which a Task that was `PENDING` gets
 reported as a replay is a whole network round trip wide rather than a statement.
 That is a database problem, and it is solved in the database whichever option
 wraps it. A Supabase Edge Function would not perform the atomic work; it would
 call the same Postgres function.
 
-What an Edge Function *would* add is a second place Auth0 tokens are verified, a
+What an Edge Function _would_ add is a second place Auth0 tokens are verified, a
 second place logging has to happen — or a hole in the "log all API activities"
 requirement, if the browser called it directly — and a network hop from local
 Express to the edge and back to Postgres. Cost without a matching benefit, for a
@@ -224,12 +243,12 @@ returning *;
 Zero rows affected means the function re-reads the row `FOR UPDATE` — still
 inside the transaction — and returns a discriminated outcome:
 
-| Outcome | Answer |
-|---|---|
-| `completed` | `200` + the Task |
-| `replayed` — already `DONE` | `200` + the Task, and `X-Idempotent-Replay: true` |
-| `wrong_status` | `409 INVALID_TRANSITION` |
-| `not_found` — missing, or not the Actor's | `404 NOT_FOUND` |
+| Outcome                                   | Answer                                            |
+| ----------------------------------------- | ------------------------------------------------- |
+| `completed`                               | `200` + the Task                                  |
+| `replayed` — already `DONE`               | `200` + the Task, and `X-Idempotent-Replay: true` |
+| `wrong_status`                            | `409 INVALID_TRANSITION`                          |
+| `not_found` — missing, or not the Actor's | `404 NOT_FOUND`                                   |
 
 Two simultaneous requests: one wins the row lock and completes the Task; the
 loser matches zero rows, observes `DONE`, and returns the identical `200`. No
@@ -242,11 +261,11 @@ double completion, and no overwritten `completed_at`.
 **Editing** uses optimistic locking on `version`. Every response carrying a Task
 sets `ETag: "<version>"`, and `PATCH` requires that value back as `If-Match`:
 
-| Condition | Answer |
-|---|---|
-| `If-Match` absent | `428 PRECONDITION_REQUIRED` |
-| `If-Match` stale | `412 VERSION_CONFLICT` |
-| `If-Match` unreadable as a version (`*`, a weak tag) | `412 VERSION_CONFLICT` |
+| Condition                                            | Answer                      |
+| ---------------------------------------------------- | --------------------------- |
+| `If-Match` absent                                    | `428 PRECONDITION_REQUIRED` |
+| `If-Match` stale                                     | `412 VERSION_CONFLICT`      |
+| `If-Match` unreadable as a version (`*`, a weak tag) | `412 VERSION_CONFLICT`      |
 
 Absent is a different mistake from stale and has a different fix — send the
 header, versus re-read the Task — so they are different codes. `If-Match: *` is
@@ -296,7 +315,7 @@ separately some RTL", that is what is here.
 of `apps/web`. Two kinds, and the split is worth stating rather than filing
 both under "unit".
 
-*Genuinely unit* — called directly, with no HTTP in front of them. The
+_Genuinely unit_ — called directly, with no HTTP in front of them. The
 transition validator and the schemas in `packages/shared`; and in `apps/api`,
 `repository.drizzle.ts` under a stubbed `pg` pool, 51 cases asserting the SQL
 and the parameters it emits, plus `mappers.ts`, `env.ts` and the generated API
@@ -308,7 +327,7 @@ Postgres one; the shared transition machine against the `WHERE` clause
 `mark_task_done()` hardcodes; and the documented routes against the ones the
 Express router actually serves.
 
-*Integration, over HTTP* — every Task operation. **There is no service layer.**
+_Integration, over HTTP_ — every Task operation. **There is no service layer.**
 The operations live in `tasks/routes.ts`, and the tests enter them through the
 real `createApp` with supertest. The repository is the seam — a fake behind the
 real interface — and the auth middleware is stubbed; everything between is real:

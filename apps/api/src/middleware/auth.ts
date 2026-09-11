@@ -53,7 +53,9 @@ export const attachActor: RequestHandler = (req, _res, next) => {
  */
 export function actorOf(req: Request): Actor {
   if (!req.actor) {
-    throw new Error("No Actor on the request: route mounted outside the auth stack");
+    throw new Error(
+      "No Actor on the request: route mounted outside the auth stack",
+    );
   }
   return req.actor;
 }

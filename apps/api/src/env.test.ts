@@ -47,9 +47,9 @@ describe("loadEnv", () => {
   });
 
   it("rejects a WEB_ORIGIN that is not a URL", () => {
-    expect(() => loadEnv({ ...COMPLETE, WEB_ORIGIN: "localhost:3000" })).toThrow(
-      /WEB_ORIGIN/,
-    );
+    expect(() =>
+      loadEnv({ ...COMPLETE, WEB_ORIGIN: "localhost:3000" }),
+    ).toThrow(/WEB_ORIGIN/);
   });
 
   it("serves the generated API description everywhere but production", () => {

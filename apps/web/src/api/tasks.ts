@@ -150,5 +150,8 @@ export async function markTaskDone(id: string): Promise<MarkDoneResponse> {
 
   // Readable only because CORS exposes it; a browser strips a header that is
   // neither safelisted nor named in `exposedHeaders` (PLAN.md §10).
-  return { task: body, replayed: headers.get("X-Idempotent-Replay") === "true" };
+  return {
+    task: body,
+    replayed: headers.get("X-Idempotent-Replay") === "true",
+  };
 }
