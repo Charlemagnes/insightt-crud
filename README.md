@@ -22,6 +22,99 @@ the brief asks to be justified explicitly.
 
 ---
 
+## Layout
+
+```
+apps/web         Next.js 16 SPA — all pages are client components, one route: /
+apps/api         Express + TypeScript REST API (CommonJS)
+apps/api/drizzle SQL migrations — generated, plus hand-written `--custom` ones
+packages/shared  @insightt/shared — Zod schemas and the Status transition rules
+cypress/         The one E2E spec, and the Auth0 sign-in that seeds it
+docs/adr/        Architecture decision records
+docs/openapi.json  Generated — `npm run docs:api`
+scripts/         setup-auth0.sh
+```
+
+The root `package.json` is workspace declarations and orchestration scripts
+only — it is not itself an app.
+
+Inside each workspace:
+
+```
+apps/api/src/     index.ts  app.ts  env.ts
+                  db/{client,schema,migrate,seed}.ts
+                  docs/    openapi     (the document, built from the schemas)
+                           router      (serves it, and Swagger UI, in dev)
+                           generate    (writes docs/openapi.json)
+                  middleware/{auth,logging,validate,errors}.ts
+                  tasks/   routes  mappers
+                           repository            (the interface)
+                           repository.drizzle    (Postgres)
+                           repository.fake       (the test fake)
+                  testing/harness.ts
+                  types/express.d.ts
+
+apps/web/src/     app/{layout,page}.tsx
+                  config.ts
+                  providers/{Auth0,Query,Antd}.tsx
+                  components/auth/    RequireAuth  LandingPanel
+                                      LoginButton  SignUpButton
+                                      LogoutButton
+                  components/tasks/   TaskListScreen  TaskTable
+                                      TaskFormModal   TaskStatusTag
+                                      TaskActions     TaskFilters
+                  components/shared/  AppHeader  FullPageSpin
+                                      ErrorState  EmptyState
+                  api/{client,tasks}.ts
+                  forms/zodFieldErrors.ts
+                  hooks/{useTasks,useTaskMutations}.ts
+                  stores/{session,taskList}.ts
+                  testing/harness.tsx
+
+packages/shared/  src/index.ts
+                  src/schemas/{task,errors}.ts
+                  src/rules/transitions.ts
+
+cypress/          e2e/task-list.cy.ts
+                  support/{e2e,commands,auth0}.ts
+```
+
+Components are grouped by the screen they belong to, with `shared/` for the
+pieces both screens reach for. `hooks/`, `stores/`, `api/` and `forms/` stay
+flat; there are five files between them and nesting would be ceremony.
+
+Four of those files are seams rather than folders, and they are why the
+[tests](#tests) below can be written at all:
+
+**`app.ts` is separate from `index.ts` on purpose.** `createApp(deps)` takes the
+Task repository and the auth middleware as arguments; `index.ts` is the only
+file that reads the environment, builds the real ones and listens. A test gets
+the real middleware stack — real CORS, real logging, real error mapper — with no
+tenant, no network and no database behind it.
+
+**`tasks/repository.ts` holds only the interface**, with the two
+implementations beside it under suffixed names. Nothing above the interface
+imports either, so nothing above it knows Drizzle exists.
+
+**`TaskListScreen` is a component rather than a function inside `page.tsx`**,
+for the same reason. `page.tsx` is the route and the auth gate; the screen
+behind it renders without Auth0, which under jsdom is the difference between
+testing the task list and testing Universal Login. The two
+`testing/harness` files build each side with its real providers and a fake at
+the edge.
+
+**`apps/web/src/config.ts` is the frontend's environment boundary** — the one
+place `process.env.NEXT_PUBLIC_*` is read, validated loudly so a missing value
+fails the build instead of becoming a redirect to `https://undefined/authorize`.
+
+`tasks/mappers.ts` is kept even though it looks like ceremony: it is the file
+that makes the Drizzle-row-versus-wire-contract separation visible in ten
+seconds rather than taken on faith. `forms/zodFieldErrors.ts` is the adapter
+between a Zod parse and Ant Design's `Form`, and it is a folder of its own
+rather than a `components/` neighbour because it renders nothing.
+
+---
+
 ## Running it
 
 **You will need**: Node 20 or newer, an [Auth0](https://auth0.com) tenant (free
@@ -183,50 +276,36 @@ every route.
 
 Full reasoning: [ADR-0001](docs/adr/0001-express-service-not-next-bff.md).
 
-We evaluated both and kept Express as its own process, for three reasons.
+The brief asks for "a TypeScript backend web framework" and, separately, for
+JSON REST between frontend and backend. A BFF satisfies both on a technicality:
+the REST boundary becomes an internal call inside one Next process, and
+"backend framework" becomes "Next.js again". Two processes across two origins
+make the boundary a real one.
 
-**The brief's own framing.** It asks for "a TypeScript backend web framework"
-and, separately, for "communication between backend and frontend through JSON
-REST API". A BFF satisfies both only on a technicality: the REST boundary
-becomes an internal call inside one Next process and "backend framework"
-becomes "Next.js again". Two processes across two origins make the boundary a
-real one.
-
-**Concurrency does not discriminate**, despite being named in the question.
-Every concurrency guarantee here lives in Postgres — the conditional `UPDATE`
-inside `mark_task_done()` and `version`-based optimistic locking on edits. A
-BFF would make neither easier nor harder.
-
-**Auth genuinely favours the BFF, and we took the worse option knowingly.** A
-BFF can hold the session in an `httpOnly` cookie, where no token is reachable
-from JavaScript at all. We chose bearer tokens because the brief asks for
-authenticated frontend-to-backend communication over REST, and a token
-validated against the tenant JWKS demonstrates that directly where a
-cookie-session BFF demonstrates a Next.js feature instead. The cost is stated
-in full under [Trade-offs](#trade-offs-taken-knowingly).
+Concurrency, though the question names it, does not discriminate — every
+guarantee here lives in Postgres, and a BFF would make none of them easier.
+Auth genuinely favours the BFF, whose `httpOnly` cookie no script can reach. We
+took bearer tokens knowingly: a token validated against the tenant JWKS
+demonstrates the authenticated REST call the brief asks for, where a
+cookie-session BFF demonstrates a Next.js feature. The cost is stated in full
+under [Trade-offs](#trade-offs-taken-knowingly).
 
 ### 2. Mark-as-Done as a web service over a custom resolver
 
 Full reasoning: [ADR-0002](docs/adr/0002-mark-as-done-mechanism.md).
 
-The brief asks for "a Cloud Function or API web service, or a Custom Resolver",
-and to evaluate which fits best. `POST /api/tasks/:id/done` delegating to the
-Postgres function `mark_task_done()` is two of the three at once.
+`POST /api/tasks/:id/done` delegating to the Postgres function
+`mark_task_done()` is two of the brief's three options at once. The deciding
+factor is where the race has to be resolved: when the conditional `UPDATE`
+changes zero rows, the caller needs to know _why_, and that question has to be
+asked inside the same transaction. Outside it, the window in which a `PENDING`
+Task is reported as a replay is a network round trip wide rather than a
+statement.
 
-The deciding factor is **where the race has to be resolved**. Marking Done must
-be atomic and idempotent, and when the conditional `UPDATE` changes zero rows
-the caller needs to know _why_ — a question that has to be asked inside the same
-transaction. Outside it, the window in which a Task that was `PENDING` gets
-reported as a replay is a whole network round trip wide rather than a statement.
-That is a database problem, and it is solved in the database whichever option
-wraps it. A Supabase Edge Function would not perform the atomic work; it would
-call the same Postgres function.
-
-What an Edge Function _would_ add is a second place Auth0 tokens are verified, a
-second place logging has to happen — or a hole in the "log all API activities"
-requirement, if the browser called it directly — and a network hop from local
-Express to the edge and back to Postgres. Cost without a matching benefit, for a
-function that already works.
+So it is solved in the database whichever option wraps it — a Supabase Edge
+Function would call the same function. What the Edge Function would add is a
+second place to verify Auth0 tokens, a second place to log, and a hop from
+Express to the edge and back to Postgres.
 
 ---
 
@@ -291,74 +370,45 @@ npm run test:e2e  # Cypress against the real Auth0 tenant
 
 375 Jest tests across three workspaces, plus one Cypress spec.
 
-### 1. Backend and shared — Jest
+**Unit.** `packages/shared` (70 tests) — the transition validator and the
+schemas. `apps/api` (273) — `repository.drizzle.ts` under a stubbed `pg` pool,
+51 cases asserting the SQL and its parameters, plus `mappers.ts`, `env.ts` and
+the generated API description. Three drift checks sit in the same tier, each
+holding apart two spellings of one rule: the Zod Status enum against the
+Postgres one, the shared transition machine against the `WHERE` clause
+`mark_task_done()` hardcodes, and the documented routes against the ones the
+Express router serves.
 
-`packages/shared` (70 tests) and `apps/api` (273), plus the non-rendering parts
-of `apps/web`. Two kinds, and the split is worth stating rather than filing
-both under "unit".
+**Backend integration, over HTTP** — every Task operation, including each legal
+Transition, each rejected one, the already-`DONE` Replay, the non-owner `404`
+and the per-Status field whitelist. There is no service layer: the operations
+live in `tasks/routes.ts` and the tests enter them through the real `createApp`
+with supertest. The repository is the seam and the auth middleware is stubbed;
+CORS, the body parser, validation and the error mapper are real. The cost of
+that choice is that the backend's domain rules have no unit test of their own.
 
-_Genuinely unit_ — called directly, with no HTTP in front of them. The
-transition validator and the schemas in `packages/shared`; and in `apps/api`,
-`repository.drizzle.ts` under a stubbed `pg` pool, 51 cases asserting the SQL
-and the parameters it emits, plus `mappers.ts`, `env.ts` and the generated API
-description.
+**Frontend integration** — `TaskListScreen` under React Testing Library with
+the real Query cache, the real stores and the real components behind it, and
+MSW the only stand-in. Auth0 is left out rather than mocked; the session store
+is seeded directly, so the API client's token behaves as it does signed in. The
+signed-out screen is the one place `useAuth0` is faked, because what it asserts
+is the argument each button hands the SDK — nothing for **Log in**,
+`screen_hint: 'signup'` for **Sign up**. A Sign up button that lost the hint
+would still sign people in, and would land someone with no account on a login
+form.
 
-Three drift checks sit in the same tier, each holding apart two spellings of one
-rule that cannot be derived from each other: the Zod Status enum against the
-Postgres one; the shared transition machine against the `WHERE` clause
-`mark_task_done()` hardcodes; and the documented routes against the ones the
-Express router actually serves.
-
-_Integration, over HTTP_ — every Task operation. **There is no service layer.**
-The operations live in `tasks/routes.ts`, and the tests enter them through the
-real `createApp` with supertest. The repository is the seam — a fake behind the
-real interface — and the auth middleware is stubbed; everything between is real:
-CORS, the body parser, validation, the error mapper. Each legal Transition, each
-rejected one, the already-`DONE` Replay, the non-owner `404` and the per-Status
-field whitelist are all asserted there.
-
-Calling a handler directly instead would skip the parts most likely to be wrong.
-The cost of the choice is that the backend's domain rules have no unit test of
-their own.
+**End to end** — `cypress/e2e/task-list.cy.ts` mints a token against the real
+Auth0 tenant, seeds it into the SDK's storage and asserts the signed-in list
+renders. It never drives Universal Login: the token is minted with the Cypress
+client, the only one allowed the Password Realm grant, and stored under the SPA
+client's cache key, the only one the browser app reads.
 
 **What is not covered**: `mark_task_done()` is never executed by an automated
 test. `db/mark-task-done.test.ts` reads the migration as text and checks it
 agrees with the TypeScript rule, but no Jest test opens a Postgres connection
 and the Cypress spec is read-only. The atomicity ADR-0002 argues for is
 therefore argued, not demonstrated; closing that needs a containerised Postgres
-running the migrations, which was outside the time budget. It is named here
-rather than left for a reviewer to find.
-
-### 2. Frontend integration — Jest + React Testing Library + MSW
-
-`TaskListScreen` with the real providers behind it — the real Query cache, the
-real Zustand stores, the real components — and MSW the only thing standing in.
-It asserts the rows the API returned, that marking an `IN_PROGRESS` Task Done
-re-renders it as Done, that a replayed `200` is handled as success rather than
-surfaced as an error, and that each row offers the one Transition its Status
-allows and no other.
-
-Auth0 is left out rather than mocked: the test renders the screen rather than
-the page and seeds the session store directly, so everything reading that store
-— the API client's token included — behaves as it does signed in. Signing in for
-real is test 3's job.
-
-The signed-out screen has a small suite of its own, and it is the one place
-`useAuth0` is faked, because what it asserts is the argument each button hands
-the SDK: nothing for **Log in**, `screen_hint: 'signup'` for **Sign up**. A
-Sign up button that lost the hint would still render and still sign people in,
-and would land someone with no account on a login form.
-
-### 3. End to end — Cypress against the real tenant
-
-`cypress/e2e/task-list.cy.ts` mints a token against the real Auth0 tenant, seeds
-it into the SDK's storage, and asserts the signed-in task list renders.
-
-It never drives Universal Login. The token is minted with the **Cypress** client
-— the only one allowed the Password Realm grant — and stored under the **SPA**
-client's cache key, the only one the browser app reads.
-`cypress/support/auth0.ts` is the single file that knows the SDK's storage
-layout.
+running the migrations, which was outside the time budget.
 
 ---
 
@@ -384,97 +434,3 @@ than injected by a platform.
 out until the Archived filter asks for them, but the row is untouched: nothing
 is flagged, `GET /api/tasks/:id` still returns it, and Delete remains legal from
 every Status. Two different operations, deliberately not collapsed into one.
-
----
-
-## Layout
-
-```
-apps/web         Next.js 16 SPA — all pages are client components, one route: /
-apps/api         Express + TypeScript REST API (CommonJS)
-apps/api/drizzle SQL migrations — generated, plus hand-written `--custom` ones
-packages/shared  @insightt/shared — Zod schemas and the Status transition rules
-cypress/         The one E2E spec, and the Auth0 sign-in that seeds it
-docs/adr/        Architecture decision records
-docs/openapi.json  Generated — `npm run docs:api`
-scripts/         setup-auth0.sh
-```
-
-npm workspaces. Both apps depend on `@insightt/shared`; neither depends on the
-other. The root `package.json` is workspace declarations and orchestration
-scripts only — it is not itself an app.
-
-Inside each workspace:
-
-```
-apps/api/src/     index.ts  app.ts  env.ts
-                  db/{client,schema,migrate,seed}.ts
-                  docs/    openapi     (the document, built from the schemas)
-                           router      (serves it, and Swagger UI, in dev)
-                           generate    (writes docs/openapi.json)
-                  middleware/{auth,logging,validate,errors}.ts
-                  tasks/   routes  mappers
-                           repository            (the interface)
-                           repository.drizzle    (Postgres)
-                           repository.fake       (the test fake)
-                  testing/harness.ts
-                  types/express.d.ts
-
-apps/web/src/     app/{layout,page}.tsx
-                  config.ts
-                  providers/{Auth0,Query,Antd}.tsx
-                  components/auth/    RequireAuth  LandingPanel
-                                      LoginButton  SignUpButton
-                                      LogoutButton
-                  components/tasks/   TaskListScreen  TaskTable
-                                      TaskFormModal   TaskStatusTag
-                                      TaskActions     TaskFilters
-                  components/shared/  AppHeader  FullPageSpin
-                                      ErrorState  EmptyState
-                  api/{client,tasks}.ts
-                  forms/zodFieldErrors.ts
-                  hooks/{useTasks,useTaskMutations}.ts
-                  stores/{session,taskList}.ts
-                  testing/harness.tsx
-
-packages/shared/  src/index.ts
-                  src/schemas/{task,errors}.ts
-                  src/rules/transitions.ts
-
-cypress/          e2e/task-list.cy.ts
-                  support/{e2e,commands,auth0}.ts
-```
-
-Components are grouped by the screen they belong to, with `shared/` for the
-pieces both screens reach for. `hooks/`, `stores/`, `api/` and `forms/` stay
-flat; there are five files between them and nesting would be ceremony.
-
-Four of those files are seams rather than folders, and they are why the tests
-above can be written at all:
-
-**`app.ts` is separate from `index.ts` on purpose.** `createApp(deps)` takes the
-Task repository and the auth middleware as arguments; `index.ts` is the only
-file that reads the environment, builds the real ones and listens. A test gets
-the real middleware stack — real CORS, real logging, real error mapper — with no
-tenant, no network and no database behind it.
-
-**`tasks/repository.ts` holds only the interface**, with the two
-implementations beside it under suffixed names. Nothing above the interface
-imports either, so nothing above it knows Drizzle exists.
-
-**`TaskListScreen` is a component rather than a function inside `page.tsx`**,
-for the same reason. `page.tsx` is the route and the auth gate; the screen
-behind it renders without Auth0, which under jsdom is the difference between
-testing the task list and testing Universal Login. The two
-`testing/harness` files build each side with its real providers and a fake at
-the edge.
-
-**`apps/web/src/config.ts` is the frontend's environment boundary** — the one
-place `process.env.NEXT_PUBLIC_*` is read, validated loudly so a missing value
-fails the build instead of becoming a redirect to `https://undefined/authorize`.
-
-`tasks/mappers.ts` is kept even though it looks like ceremony: it is the file
-that makes the Drizzle-row-versus-wire-contract separation visible in ten
-seconds rather than taken on faith. `forms/zodFieldErrors.ts` is the adapter
-between a Zod parse and Ant Design's `Form`, and it is a folder of its own
-rather than a `components/` neighbour because it renders nothing.
