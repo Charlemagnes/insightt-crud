@@ -11,6 +11,7 @@ import {
   type Task,
 } from "@insightt/shared";
 import { App, Form, Input, Modal } from "antd";
+import { useEffect, useRef } from "react";
 
 import { ApiError } from "@/api/client";
 import {
@@ -33,6 +34,9 @@ interface TaskFormValues {
 
 /** A form with nothing typed in it, which is what a create starts from. */
 const BLANK: TaskFormValues = { title: "", description: "" };
+
+/** What the form is open on when it is open on no Task at all: a create. */
+const NEW_TASK = "new";
 
 interface TaskFormModalProps {
   open: boolean;
@@ -64,6 +68,34 @@ export function TaskFormModal({ open, onClose, task }: TaskFormModalProps) {
 
   const editing = task !== undefined;
   const pending = editing ? update.isPending : create.isPending;
+
+  // antd's form store outlives the inputs it feeds. Closing the modal unmounts
+  // the fields but not the store, and the next mount merges the store *over*
+  // `initialValues` rather than under it — so a form reopened on a second Task
+  // came back holding the first one's text, and saving would have renamed the
+  // wrong Task. Writing the values in when the form opens is what makes the
+  // modal show the Task it was opened on.
+  //
+  // `setFieldsValue` and not `resetFields`, which would read whatever
+  // `initialValues` the store was last handed: the modal renders its contents
+  // after this effect runs, so at that moment they are still the last Task's.
+  //
+  // Seeding once per target rather than on every run of the effect is what
+  // keeps a refetch out of it: the Task's identity changes whenever the list
+  // comes back, and reseeding then would discard whatever had been typed.
+  const seededFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    const target = open ? (task?.id ?? NEW_TASK) : null;
+
+    if (seededFor.current === target) return;
+    seededFor.current = target;
+
+    if (!open) return;
+
+    form.resetFields();
+    form.setFieldsValue(task ? valuesOf(task) : BLANK);
+  }, [open, task, form]);
 
   function close() {
     form.resetFields();
@@ -191,10 +223,8 @@ export function TaskFormModal({ open, onClose, task }: TaskFormModalProps) {
       cancelButtonProps={{ disabled: pending }}
       onOk={() => void submit()}
       onCancel={close}
-      // The text is only worth keeping while the modal is open, and destroying
-      // it is also what re-seeds the inputs: reopened on another Task, the form
-      // remounts and reads that Task's `initialValues` rather than the last
-      // one's.
+      // The text is only worth keeping while the modal is open. What the
+      // inputs then show is the effect above's business, not this prop's.
       destroyOnHidden
       mask={{ closable: !pending }}
     >

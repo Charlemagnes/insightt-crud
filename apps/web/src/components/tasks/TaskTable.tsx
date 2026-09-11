@@ -1,7 +1,8 @@
 "use client";
 
 import { TASK_PAGE, type Task } from "@insightt/shared";
-import { Table, Typography, type TableProps } from "antd";
+import { Button, Table, Typography, type TableProps } from "antd";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -67,9 +68,13 @@ const columnsFor = (
   {
     title: "Actions",
     key: "actions",
-    // Wide enough for every control a row shows — the disabled ones take up
-    // the same space as the enabled ones.
-    width: 420,
+    // Three icon buttons wide. A row offers Edit, one Next, and Delete
+    // whatever its Status, so the column never has to grow for a wordier
+    // control than the last.
+    width: 160,
+    // Centred on both the header and the cells, so the three icons sit under
+    // the word that names them rather than hard against the column's edge.
+    align: "center",
     // The whole Task, not one field: which controls a row offers is a question
     // about its Status, and the mutations address it by id.
     render: (_: unknown, task: Task) => (
@@ -129,6 +134,7 @@ export function TaskTable({
       rowKey="id"
       columns={columnsFor(onEdit)}
       dataSource={tasks}
+      bordered={true}
       // Ant Design's overlay dims the rows underneath rather than replacing
       // them, which is what turns `keepPreviousData` into a visible "loading
       // the next page" instead of a table that empties and reflows.
@@ -144,6 +150,25 @@ export function TaskTable({
       expandable={{
         columnWidth: 48,
         rowExpandable: (task) => task.description !== null,
+        // A chevron pointing the way the row will move: down to open the
+        // description, up to close it again. Ant Design's default is a boxed
+        // plus/minus, which reads as add and remove rather than show and hide.
+        //
+        // A row with no description gets nothing rather than an inert chevron.
+        // The cell is still drawn at `columnWidth`, so the rows stay aligned.
+        expandIcon: ({ expanded, onExpand, record, expandable }) =>
+          expandable ? (
+            <Button
+              type="text"
+              size="small"
+              aria-label={expanded ? "Hide description" : "Show description"}
+              aria-expanded={expanded}
+              icon={
+                expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />
+              }
+              onClick={(event) => onExpand(record, event)}
+            />
+          ) : null,
         expandedRowRender: (task) => (
           <Paragraph
             // The text is whatever someone typed, newlines included, and the

@@ -179,9 +179,39 @@ describe("the task list", () => {
   });
 
   /**
-   * Every row shows every control, disabled where the move is not legal from
-   * that Status — so the whole lifecycle is checked here rather than the one
-   * Status the other tests happen to use.
+   * The regression this test exists for. antd's form store outlives the modal's
+   * contents, and it wins over `initialValues` when the fields remount — so the
+   * second Task edited in a session came up wearing the first one's title, and
+   * saving it would have renamed the wrong work.
+   *
+   * The description is asserted too, because the two fields fail separately: a
+   * fix that only reseeds what was typed in leaves the untouched one stale.
+   */
+  it("shows the Task it was opened on when a second row is edited", async () => {
+    api.reset([
+      aTask({ title: "Write the plan", description: "The plan" }),
+      aTask({ title: "Ship the API", description: "The API" }),
+    ]);
+
+    renderTaskList();
+    await screen.findByText("Write the plan");
+
+    await userEvent.click(buttonIn("Write the plan", "Edit"));
+    expect(await screen.findByLabelText("Title")).toHaveValue("Write the plan");
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await userEvent.click(buttonIn("Ship the API", "Edit"));
+
+    expect(await screen.findByLabelText("Title")).toHaveValue("Ship the API");
+    expect(screen.getByLabelText("Description")).toHaveValue("The API");
+  });
+
+  /**
+   * A row offers one Transition, named for the one move its Status allows —
+   * the machine is linear, so there is never a second to choose between. What
+   * is checked here is that the name matches the Status, and that the terminal
+   * one offers nothing.
    *
    * Delete is asserted enabled on the terminal Status on purpose: it is the
    * counterpart to the rest of that row being greyed out, and without it the
@@ -191,23 +221,36 @@ describe("the task list", () => {
    * place it appears — which is also why the loop runs per view rather than
    * over one page holding all four.
    */
-  it("disables the actions a row's Status makes impossible", async () => {
-    const legal: Record<TaskStatus, string[]> = {
-      PENDING: ["Edit", "Start"],
-      IN_PROGRESS: ["Edit", "Mark done"],
-      DONE: ["Edit", "Archive"],
-      ARCHIVED: [],
+  it("offers each row the one Transition its Status allows", async () => {
+    const step: Record<TaskStatus, string> = {
+      PENDING: "Start",
+      IN_PROGRESS: "Mark done",
+      DONE: "Archive",
+      // The label the control wears when there is no move left, so an Archived
+      // row still has a third button in the third place, turned off.
+      ARCHIVED: "No next step",
     };
 
     const expectRow = (title: string, status: TaskStatus) => {
-      for (const label of ["Edit", "Start", "Mark done", "Archive"]) {
-        // `toBeDisabled`, not the `disabled` property: it is the state assistive
-        // technology reports, so a control turned off with `aria-disabled` alone
-        // would still have to say so.
-        if (legal[status].includes(label)) {
-          expect(buttonIn(title, label)).toBeEnabled();
-        } else {
-          expect(buttonIn(title, label)).toBeDisabled();
+      // `toBeDisabled`, not the `disabled` property: it is the state assistive
+      // technology reports, so a control turned off with `aria-disabled` alone
+      // would still have to say so.
+      const next = buttonIn(title, step[status]);
+      if (status === "ARCHIVED") {
+        expect(next).toBeDisabled();
+        expect(buttonIn(title, "Edit")).toBeDisabled();
+      } else {
+        expect(next).toBeEnabled();
+        expect(buttonIn(title, "Edit")).toBeEnabled();
+      }
+
+      // No other row is a second Transition in disguise: the labels the other
+      // Statuses use are absent, not merely greyed out.
+      for (const other of Object.values(step)) {
+        if (other !== step[status]) {
+          expect(
+            within(rowFor(title)).queryByRole("button", { name: other }),
+          ).not.toBeInTheDocument();
         }
       }
 

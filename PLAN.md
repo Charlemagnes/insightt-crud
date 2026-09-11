@@ -746,8 +746,11 @@ button, not get bounced to a login screen they did not ask for.
 - `Table` for the list, with server-driven pagination wired to `useTaskListStore`
 - `Form` + `Modal` for create and edit
 - `Tag` for status, `Popconfirm` for delete, `message` / `notification` for outcomes
-- Action buttons are enabled/disabled by `canTransition()` and `canEdit()` from
-  `packages/shared`, so the UI never offers an action the API will reject
+- A row offers three icon controls — Edit, Next, Delete — each named by a
+  tooltip. Next is one button and not three: the machine is linear, so
+  `nextStatus()` from `packages/shared` names the single move a Status allows,
+  and Edit is enabled by `canEdit()`. The UI never offers an action the API
+  will reject
 - The Done mutation treats a replayed `200` as success, not an error
 
 **UX states.** The evaluation criteria name "Loading indicators, proper UX", so
@@ -869,8 +872,8 @@ left for a reviewer to notice.
 real Zustand stores, the real components — and MSW the only thing standing in.
 It asserts the rows the API returned, that marking an `IN_PROGRESS` Task Done
 re-renders it as Done, that a replayed `200` is handled as success rather than
-surfaced as an error, and that every control a row's Status makes illegal is
-rendered disabled.
+surfaced as an error, and that each row offers the one Transition its Status
+allows and no other.
 
 Auth0 is left out rather than mocked. The test renders the screen rather than
 the page, and seeds the session store with the same write `SessionMirror`

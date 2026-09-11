@@ -2,12 +2,13 @@
 
 import {
   canEditAnything,
-  canTransition,
+  nextStatus,
   type Task,
   type TaskStatus,
 } from "@insightt/shared";
-import { App, Button, Popconfirm, Space } from "antd";
-import type { ButtonProps } from "antd";
+import { App, Button, Popconfirm, Space, Tooltip } from "antd";
+import { ArrowRight, Pencil, Trash2 } from "lucide-react";
+import type { ReactElement, ReactNode } from "react";
 
 import {
   useArchiveTask,
@@ -17,24 +18,26 @@ import {
 } from "@/hooks/useTaskMutations";
 
 /**
- * The Transitions a row offers.
+ * The controls a row offers: Edit, Next, Delete.
  *
- * Each control is enabled by `canTransition` — the same predicate the API
- * enforces — so an enabled button cannot produce a `409`. Every row shows
- * every control, disabled where the move is not legal from that Status rather
- * than hidden: the shape of the lifecycle stays visible, and a cell that
- * changes shape per row is harder to scan than one that greys out. An
- * `ARCHIVED` Task shows all of them disabled, which is what terminal looks
- * like.
+ * Next is one control and not three. The Status machine is strictly linear, so
+ * a Task has at most one legal move at any moment (CONTEXT.md, "Transition") —
+ * three buttons of which two are always greyed out state the same fact three
+ * times. `nextStatus` names the one move, and the tooltip says which it is, so
+ * the lifecycle stays legible without a row of dead controls.
  *
- * Edit is the one control that is not a Transition, and it asks a different
- * question: `canEditAnything`, which is `false` only for `ARCHIVED` — a Task
- * that is finished and put away has no field left to change.
+ * Edit asks a different question: `canEditAnything`, which is `false` only for
+ * `ARCHIVED` — a Task that is finished and put away has no field left to
+ * change.
  *
  * Delete asks nothing at all. It is legal from every Status including
  * `ARCHIVED` (PLAN.md §7), so it is the one control that is never disabled —
  * and the only one behind a confirmation, because it is the only one that
  * cannot be undone by another click.
+ *
+ * All three are icons with a tooltip for their name. The icon is what is drawn
+ * and the `aria-label` is what is announced, so the name is never only a
+ * hover away.
  */
 export function TaskActions({ task, onEdit }: TaskActionsProps) {
   const { message } = App.useApp();
@@ -63,26 +66,44 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
     }
   }
 
-  const runStart = () =>
-    run(async () => {
-      await start.mutateAsync(task.id);
-      return "Task started";
-    }, "Could not start the task");
+  /**
+   * Every step the machine has, keyed by the Status it arrives at — which is
+   * exactly what `nextStatus` answers, so the row below looks its control up
+   * rather than deciding anything. `PENDING` is absent because nothing
+   * transitions into it: every Task starts there.
+   */
+  const steps: Record<Exclude<TaskStatus, "PENDING">, Step> = {
+    IN_PROGRESS: {
+      label: "Start",
+      pending: start.isPending,
+      run: () =>
+        run(async () => {
+          await start.mutateAsync(task.id);
+          return "Task started";
+        }, "Could not start the task"),
+    },
+    DONE: {
+      label: "Mark done",
+      pending: done.isPending,
+      run: () =>
+        run(async () => {
+          const { replayed } = await done.mutateAsync(task.id);
 
-  const runDone = () =>
-    run(async () => {
-      const { replayed } = await done.mutateAsync(task.id);
-
-      // A Replay is a success, and saying so plainly is better than a second
-      // "Task done" for work the person already finished elsewhere.
-      return replayed ? "That task was already done" : "Task done";
-    }, "Could not mark the task done");
-
-  const runArchive = () =>
-    run(async () => {
-      await archive.mutateAsync(task.id);
-      return "Task archived";
-    }, "Could not archive the task");
+          // A Replay is a success, and saying so plainly is better than a
+          // second "Task done" for work the person already finished elsewhere.
+          return replayed ? "That task was already done" : "Task done";
+        }, "Could not mark the task done"),
+    },
+    ARCHIVED: {
+      label: "Archive",
+      pending: archive.isPending,
+      run: () =>
+        run(async () => {
+          await archive.mutateAsync(task.id);
+          return "Task archived";
+        }, "Could not archive the task"),
+    },
+  };
 
   const runDelete = () =>
     run(async () => {
@@ -90,37 +111,34 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
       return "Task deleted";
     }, "Could not delete the task");
 
+  const to = nextStatus(task.status);
+  const step = to === null || to === "PENDING" ? null : steps[to];
+
   return (
-    <Space>
-      <Button
-        size="small"
-        disabled={!canEditAnything(task.status)}
-        onClick={() => onEdit(task)}
-      >
-        Edit
-      </Button>
-      <TransitionButton
-        task={task}
-        to="IN_PROGRESS"
-        label="Start"
-        pending={start.isPending}
-        onRun={runStart}
-      />
-      <TransitionButton
-        task={task}
-        to="DONE"
-        label="Mark done"
-        type="primary"
-        pending={done.isPending}
-        onRun={runDone}
-      />
-      <TransitionButton
-        task={task}
-        to="ARCHIVED"
-        label="Archive"
-        pending={archive.isPending}
-        onRun={runArchive}
-      />
+    <Space size={12}>
+      <IconAction label="Edit">
+        <Button
+          size="medium"
+          aria-label="Edit"
+          icon={<Pencil size={16} />}
+          disabled={!canEditAnything(task.status)}
+          onClick={() => onEdit(task)}
+        />
+      </IconAction>
+      {/* The terminal Status keeps the control rather than dropping it, so the
+          three cells stay in the same three places down the column — and the
+          tooltip says why it is off instead of leaving a gap to interpret. */}
+      <IconAction label={step?.label ?? "No next step"}>
+        <Button
+          size="medium"
+          type="primary"
+          aria-label={step?.label ?? "No next step"}
+          icon={<ArrowRight size={16} />}
+          disabled={step === null}
+          loading={step?.pending ?? false}
+          onClick={() => void step?.run()}
+        />
+      </IconAction>
       <Popconfirm
         title="Delete this task?"
         description="It will not be recoverable."
@@ -139,9 +157,18 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
         // always resolves and the popover always closes.
         onConfirm={() => runDelete()}
       >
-        <Button size="small" danger>
-          Delete
-        </Button>
+        {/* Tooltip directly, without the wrapper the other two need: this
+            control is never disabled, and Popconfirm has to reach the element
+            it opens from — a plain `<span>` in between would swallow the click
+            handler it clones onto its child. */}
+        <Tooltip title="Delete">
+          <Button
+            size="medium"
+            danger
+            aria-label="Delete"
+            icon={<Trash2 size={16} />}
+          />
+        </Tooltip>
       </Popconfirm>
     </Space>
   );
@@ -156,40 +183,34 @@ interface TaskActionsProps {
   onEdit: (task: Task) => void;
 }
 
-interface TransitionButtonProps {
-  task: Task;
-  /** Where this control would move the Task, which is what decides its state. */
-  to: TaskStatus;
+/** One step of the machine, as the row has to offer it. */
+interface Step {
+  /** What the step is called, in the tooltip and to a screen reader. */
   label: string;
   pending: boolean;
-  onRun: () => Promise<void>;
-  type?: ButtonProps["type"];
+  run: () => Promise<void>;
 }
 
 /**
- * One Transition control, written once for all of them. Whether it is enabled
- * is not a prop: it is `canTransition`, asked here, so no control can be
- * offered for a move the machine refuses — and adding a fourth is a matter of
- * naming the Status it moves to.
+ * An icon button's name, on hover and to assistive technology.
+ *
+ * The `<span>` is load-bearing. A disabled button fires no pointer events, so
+ * a tooltip anchored straight to one never opens — and the control that most
+ * needs to explain itself is the one that is off. Wrapping restores the hover
+ * target; `inline-flex` keeps the wrapper the size of the button so the row's
+ * spacing does not change.
  */
-function TransitionButton({
-  task,
-  to,
+function IconAction({
   label,
-  pending,
-  onRun,
-  type,
-}: TransitionButtonProps) {
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}): ReactElement {
   return (
-    <Button
-      size="small"
-      type={type}
-      disabled={!canTransition(task.status, to)}
-      loading={pending}
-      onClick={() => void onRun()}
-    >
-      {label}
-    </Button>
+    <Tooltip title={label}>
+      <span style={{ display: "inline-flex" }}>{children}</span>
+    </Tooltip>
   );
 }
 

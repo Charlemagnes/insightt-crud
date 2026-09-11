@@ -335,8 +335,8 @@ rather than left for a reviewer to find.
 real Zustand stores, the real components — and MSW the only thing standing in.
 It asserts the rows the API returned, that marking an `IN_PROGRESS` Task Done
 re-renders it as Done, that a replayed `200` is handled as success rather than
-surfaced as an error, and that every control a row's Status makes illegal is
-rendered disabled.
+surfaced as an error, and that each row offers the one Transition its Status
+allows and no other.
 
 Auth0 is left out rather than mocked: the test renders the screen rather than
 the page and seeds the session store directly, so everything reading that store

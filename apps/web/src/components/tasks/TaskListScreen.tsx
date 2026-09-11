@@ -1,6 +1,7 @@
 "use client";
 
 import { Button, Flex, Layout } from "antd";
+import { Plus } from "lucide-react";
 import { useEffect } from "react";
 
 import { ALL_STATUSES } from "@/api/tasks";
@@ -108,7 +109,11 @@ export function TaskListScreen() {
           <Flex vertical gap={16}>
             <Flex justify="space-between" align="center" wrap gap={12}>
               <TaskFilters />
-              <Button type="primary" onClick={openCreate}>
+              <Button
+                type="primary"
+                icon={<Plus size={16} />}
+                onClick={openCreate}
+              >
                 New task
               </Button>
             </Flex>

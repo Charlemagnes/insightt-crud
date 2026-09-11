@@ -65,6 +65,14 @@ function alsoTransform(pattern) {
 const createConfig = nextJest({ dir: "./" })({
   testEnvironment: "jest-fixed-jsdom",
   roots: ["<rootDir>/src"],
+  // Jest's five-second default is a unit test's budget, and these are
+  // integration tests: a single one renders the whole screen, waits on MSW and
+  // drives antd's Table and Modal through jsdom, which has no layout engine and
+  // no compositor to make animation cheap. Several seconds is normal here, and
+  // they are slower again when the suites run in parallel — so the default
+  // fails on a busy machine rather than on a broken change, which is the one
+  // thing a timeout must not do.
+  testTimeout: 20_000,
   // `setupFiles`, not `setupFilesAfterEnv`: `config.ts` reads its environment
   // at import time, and the later hook runs after the test framework has
   // already pulled the module graph in.
