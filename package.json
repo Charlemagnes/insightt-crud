@@ -12,6 +12,9 @@
     "start": "npm run start -w @insightt/web",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate -w @insightt/api",
+    "db:migrate": "npm run db:migrate -w @insightt/api",
+    "db:seed": "npm run db:seed -w @insightt/api",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {

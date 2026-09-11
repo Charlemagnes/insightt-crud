@@ -49,3 +49,28 @@ export function paginated<Item extends z.ZodType>(item: Item) {
 
 export const TaskPageSchema = paginated(TaskSchema);
 export type TaskPage = z.infer<typeof TaskPageSchema>;
+
+/**
+ * The `GET /api/tasks` query string. `z.coerce` because a query string arrives
+ * as text — `?page=2` is `"2"` until something says otherwise.
+ *
+ * `status` has no default: an unfiltered list shows every Status, Archived
+ * included. Archived is a Status, not a soft delete (CONTEXT.md, "Archived").
+ */
+export const TaskListQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  // Capped so a caller cannot ask for the whole table in one round trip.
+  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  status: TaskStatus.optional(),
+});
+export type TaskListQuery = z.infer<typeof TaskListQuery>;
+
+/**
+ * The `:id` path parameter, parsed as a UUID. This is what keeps a malformed
+ * id from reaching Postgres, where `where id = 'nonsense'` is a type error and
+ * would surface as `500`. Parsed here it is simply a Task that does not exist,
+ * which is the truth, and it is reported as `404` — the same answer a Task
+ * owned by someone else gets, so neither leaks existence.
+ */
+export const TaskIdParam = z.object({ id: z.uuid() });
+export type TaskIdParam = z.infer<typeof TaskIdParam>;

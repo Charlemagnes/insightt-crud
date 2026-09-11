@@ -1,6 +1,7 @@
 import { loadEnv } from "@/env";
 
 const COMPLETE = {
+  DATABASE_URL: "postgresql://postgres:secret@pooler.example:5432/postgres",
   AUTH0_DOMAIN: "example.eu.auth0.com",
   AUTH0_AUDIENCE: "https://tasks.example/api",
   PORT: "4000",
@@ -22,7 +23,9 @@ describe("loadEnv", () => {
   });
 
   it("names every missing variable in one throw", () => {
-    expect(() => loadEnv({})).toThrow(/AUTH0_DOMAIN[\s\S]*AUTH0_AUDIENCE/);
+    expect(() => loadEnv({})).toThrow(
+      /DATABASE_URL[\s\S]*AUTH0_DOMAIN[\s\S]*AUTH0_AUDIENCE/,
+    );
   });
 
   it("rejects a WEB_ORIGIN that is not a URL", () => {
