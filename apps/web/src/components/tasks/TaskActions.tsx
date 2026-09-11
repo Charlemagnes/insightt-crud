@@ -6,11 +6,12 @@ import {
   type Task,
   type TaskStatus,
 } from "@insightt/shared";
-import { App, Button, Space } from "antd";
+import { App, Button, Popconfirm, Space } from "antd";
 import type { ButtonProps } from "antd";
 
 import {
   useArchiveTask,
+  useDeleteTask,
   useMarkTaskDone,
   useStartTask,
 } from "@/hooks/useTaskMutations";
@@ -29,12 +30,18 @@ import {
  * Edit is the one control that is not a Transition, and it asks a different
  * question: `canEditAnything`, which is `false` only for `ARCHIVED` — a Task
  * that is finished and put away has no field left to change.
+ *
+ * Delete asks nothing at all. It is legal from every Status including
+ * `ARCHIVED` (PLAN.md §7), so it is the one control that is never disabled —
+ * and the only one behind a confirmation, because it is the only one that
+ * cannot be undone by another click.
  */
 export function TaskActions({ task, onEdit }: TaskActionsProps) {
   const { message } = App.useApp();
   const start = useStartTask();
   const done = useMarkTaskDone();
   const archive = useArchiveTask();
+  const deletion = useDeleteTask();
 
   /**
    * Runs a Transition and says what happened. The success line is whatever the
@@ -77,6 +84,12 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
       return "Task archived";
     }, "Could not archive the task");
 
+  const runDelete = () =>
+    run(async () => {
+      await deletion.mutateAsync(task.id);
+      return "Task deleted";
+    }, "Could not delete the task");
+
   return (
     <Space>
       <Button size="small" disabled={!canEditAnything(task.status)} onClick={() => onEdit(task)}>
@@ -104,6 +117,28 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
         pending={archive.isPending}
         onRun={runArchive}
       />
+      <Popconfirm
+        title="Delete this task?"
+        description="It will not be recoverable."
+        okText="Delete"
+        cancelText="Cancel"
+        // The loading state belongs on the confirm control, not the row's
+        // button: the person is looking at the popover when the request goes,
+        // and it is the control they pressed.
+        okButtonProps={{ danger: true, loading: deletion.isPending }}
+        // The promise is returned rather than discarded, and that is what makes
+        // the line above visible: antd closes the popover the moment `onConfirm`
+        // hands back anything that is not thenable, which would take the confirm
+        // control away before it could ever show a spinner. Returned, the
+        // popover stays until the request settles and a second press is ignored
+        // while it is in flight. `runDelete` reports its own failures, so it
+        // always resolves and the popover always closes.
+        onConfirm={() => runDelete()}
+      >
+        <Button size="small" danger>
+          Delete
+        </Button>
+      </Popconfirm>
     </Space>
   );
 }

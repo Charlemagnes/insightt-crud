@@ -7,7 +7,12 @@ import {
   type UpdateTaskInput,
 } from "@insightt/shared";
 
-import { apiFetch, apiFetchWithHeaders, jsonRequest } from "@/api/client";
+import {
+  apiFetch,
+  apiFetchWithHeaders,
+  apiSend,
+  jsonRequest,
+} from "@/api/client";
 
 /** The Transition endpoints take no body — the target Status is in the path. */
 const TRANSITION_REQUEST: RequestInit = { method: "POST" };
@@ -64,6 +69,16 @@ export function updateTask({
     // API issued and that tag is quoted.
     headers: { ...init.headers, "If-Match": `"${version}"` },
   });
+}
+
+/**
+ * Deletes a Task, from any Status and with no Version (PLAN.md §6).
+ *
+ * Nothing comes back, because the API answers `204`: the Task a body would have
+ * described does not exist any more. A Task that was already gone is `404`.
+ */
+export async function deleteTask(id: string): Promise<void> {
+  await apiSend(`/api/tasks/${id}`, { method: "DELETE" });
 }
 
 /** Starts a Task: `PENDING → IN_PROGRESS`. */

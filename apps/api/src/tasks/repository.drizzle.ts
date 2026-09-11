@@ -152,6 +152,21 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
         : { outcome: "not_found" };
     },
 
+    async delete({ userId, id }: OwnerScopedTaskQuery): Promise<boolean> {
+      // Owner-scoped in the `WHERE` like every other statement here, and with
+      // no Status predicate: Delete is legal from all four (PLAN.md §7).
+      //
+      // `returning` a single column rather than the row: the answer is whether
+      // a row matched, and reading the rest of a Task that no longer exists
+      // would only invite a caller to return it.
+      const [row] = await db
+        .delete(tasks)
+        .where(and(eq(tasks.id, id), eq(tasks.ownerId, userId)))
+        .returning({ id: tasks.id });
+
+      return row !== undefined;
+    },
+
     async start(query: OwnerScopedTaskQuery): Promise<TransitionResult> {
       return transition(db, query, "IN_PROGRESS", STARTS_FROM);
     },

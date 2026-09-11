@@ -135,6 +135,25 @@ export function createTaskRoutes(repository: TaskRepository): Router {
     sendTask(res, result.task);
   });
 
+  // No `If-Match`, unlike `PATCH`, and no Status guard, unlike the Transitions
+  // below — see `TaskRepository.delete` for why neither belongs here.
+  router.delete("/:id", taskIdValidator, async (req, res) => {
+    const deleted = await repository.delete({
+      userId: actorOf(req).userId,
+      id: taskIdValidator.read(req).params.id,
+    });
+
+    // Which covers a second delete of the same Task as well as one that was
+    // never the Actor's.
+    if (!deleted) {
+      throw new ApiError(404, "NOT_FOUND", "Task not found");
+    }
+
+    // `204`, and no `ETag`: there is no Task left to carry a Version, and a
+    // body describing one would describe something that no longer exists.
+    res.status(204).end();
+  });
+
   // No request body on any Transition endpoint: the target Status is in the
   // path, so there is nothing to validate and nothing a client can contradict.
   router.post("/:id/start", taskIdValidator, async (req, res) => {

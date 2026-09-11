@@ -236,7 +236,7 @@ JSON REST. All routes require a valid Auth0 access token.
 | `POST` | `/api/tasks/:id/start` | `PENDING → IN_PROGRESS` | `200` + `Task` |
 | `POST` | `/api/tasks/:id/done` | `IN_PROGRESS → DONE`, idempotent | `200` + `Task` |
 | `POST` | `/api/tasks/:id/archive` | `DONE → ARCHIVED` | `200` + `Task` |
-| `DELETE` | `/api/tasks/:id` | Delete, allowed from any status | `204` |
+| `DELETE` | `/api/tasks/:id` | Delete, allowed from any status; no `If-Match` | `204` |
 
 State changes are dedicated endpoints rather than `PATCH { status }`, which
 keeps the transition rules and the idempotent Done path explicit and leaves
@@ -246,6 +246,11 @@ validate and nothing a client can contradict.
 
 Every mutation except `DELETE` returns the full `Task`, because §12's optimistic
 updates overwrite the cache from the response body so `version` self-corrects.
+`DELETE` answers `204` with no body and no `ETag` — there is no Task left to
+describe — and takes no `If-Match`: a Version protects an edit from overwriting
+words someone else wrote, and a delete overwrites nothing. A second `DELETE` of
+the same task is `404`, not a replay; the task is gone, so there is nothing to
+report success about.
 
 **Optimistic concurrency.** `GET /api/tasks/:id` and every mutation response
 carry `ETag: "<version>"`. `PATCH` requires `If-Match`:
@@ -628,10 +633,16 @@ automatically. Zustand owns "what the user is looking at"; Query owns the rows.
 
 **Mutation policy.**
 
-- Per-row mutations (`PATCH`, `/start`, `/done`, `/archive`, `DELETE`) are
+- Per-row mutations (`PATCH`, `/start`, `/done`, `/archive`) are
   **optimistic**: `onMutate` snapshots the cache, `onError` restores it, and
   `onSuccess` overwrites the row from the response body so `version`
   self-corrects and the next `If-Match` is never stale.
+- **`DELETE` is optimistic too, but page-shaped rather than row-shaped.** The
+  row is taken out and `total` lowered with it, so the pager cannot offer a page
+  that is no longer there. There is no `onSuccess` correction: a `204` carries
+  no body, and the row it would have corrected is gone. Snapshot, rollback and
+  `onSettled` are the same, which is why the cache policy lives once in
+  `useOptimisticPage` and the per-row mutations are one caller of it.
 - **Create is not optimistic.** Under `created_at desc` pagination a new task's
   position is not knowable client-side and `total` cannot be adjusted correctly
   across pages, so create simply invalidates.

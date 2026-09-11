@@ -1433,6 +1433,152 @@ describe("POST /api/tasks/:id/archive", () => {
   });
 });
 
+describe("DELETE /api/tasks/:id", () => {
+  it("removes the Task and answers with no content", async () => {
+    const task = aTask();
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).delete(`/api/tasks/${task.id}`);
+
+    // `204`, not `200` with the Task: there is no Task any more, and a body
+    // describing one would be describing something that no longer exists.
+    expect(response.status).toBe(204);
+    expect(response.body).toEqual({});
+  });
+
+  it("takes the Task out of the list", async () => {
+    const kept = aTask();
+    const deleted = aTask();
+    const { app } = harness({ tasks: [kept, deleted] });
+
+    await request(app).delete(`/api/tasks/${deleted.id}`);
+    const list = await request(app).get("/api/tasks");
+
+    // Unlike Archived, which is a Status the list still shows, a deleted Task
+    // is gone — and `total` has to say so, or the pager offers a page that is
+    // no longer there.
+    expect(idsOf(list.body.items)).toEqual([kept.id]);
+    expect(list.body.total).toBe(1);
+  });
+
+  it("leaves nothing to find afterwards", async () => {
+    const task = aTask();
+    const { app } = harness({ tasks: [task] });
+
+    await request(app).delete(`/api/tasks/${task.id}`);
+    const after = await request(app).get(`/api/tasks/${task.id}`);
+
+    expect(after.status).toBe(404);
+  });
+
+  it("scopes the delete to the Actor", async () => {
+    const remove = jest.fn(async () => false);
+    const { app } = harness({ taskRepository: { delete: remove } });
+
+    await request(app).delete(`/api/tasks/${ABSENT_ID}`);
+
+    expect(remove).toHaveBeenCalledWith({
+      userId: TEST_USER_ID,
+      id: ABSENT_ID,
+    });
+  });
+
+  it("needs no If-Match, because there is no Version a delete could clobber", async () => {
+    const task = aTask({ version: 7 });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).delete(`/api/tasks/${task.id}`);
+
+    // The `428` a bodiless `PATCH` gets is about protecting an edit from
+    // overwriting someone else's words. A delete has no words to overwrite.
+    expect(response.status).toBe(204);
+  });
+
+  describe("every Status it deletes from", () => {
+    it("covers the whole lifecycle", () => {
+      // Guards the table below: add a Status and this fails until the case is
+      // covered, rather than silently testing three of four.
+      expect(LIFECYCLE).toHaveLength(4);
+    });
+
+    it.each(LIFECYCLE)("deletes a %s Task", async (status) => {
+      const task = aTask({ status });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await request(app).delete(`/api/tasks/${task.id}`);
+
+      // Deliberately unrestricted: the brief says "Delete Task" flat, and a
+      // restriction it does not ask for would be the worse deviation
+      // (PLAN.md §7). `ARCHIVED` is terminal for Transitions, not for this.
+      expect(response.status).toBe(204);
+    });
+  });
+
+  describe("the deletes it refuses", () => {
+    it("reports a second delete of the same Task as NOT_FOUND", async () => {
+      const task = aTask();
+      const { app } = harness({ tasks: [task] });
+
+      const first = await request(app).delete(`/api/tasks/${task.id}`);
+      const second = await request(app).delete(`/api/tasks/${task.id}`);
+
+      // Not a Replay. Mark Done can repeat because the Task is still there to
+      // report as finished; a deleted Task is not there to report anything
+      // about, so the honest answer is that it is gone.
+      expect(first.status).toBe(204);
+      expect(second.status).toBe(404);
+      expect(second.body.error.code).toBe("NOT_FOUND");
+    });
+
+    it("reports a Task owned by someone else as NOT_FOUND", async () => {
+      const theirs = aTask({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const response = await request(app).delete(`/api/tasks/${theirs.id}`);
+
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe("NOT_FOUND");
+    });
+
+    it("leaves another Actor's Task where it was", async () => {
+      const theirs = aTask({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+      const { app: theirApp } = harness({
+        tasks: [theirs],
+        requireAuth: authenticateAs(OTHER_USER_ID),
+      });
+
+      await request(app).delete(`/api/tasks/${theirs.id}`);
+      const after = await request(theirApp).get(`/api/tasks/${theirs.id}`);
+
+      expect(after.status).toBe(200);
+    });
+
+    it("answers identically for a Task that exists elsewhere and one that does not", async () => {
+      const theirs = aTask({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const [notOwned, absent] = await Promise.all([
+        request(app).delete(`/api/tasks/${theirs.id}`),
+        request(app).delete(`/api/tasks/${ABSENT_ID}`),
+      ]);
+
+      expect(notOwned.status).toBe(absent.status);
+      expect(notOwned.body).toEqual(absent.body);
+    });
+
+    it("reports a malformed id as NOT_FOUND without reaching the repository", async () => {
+      const remove = jest.fn(async () => false);
+      const { app } = harness({ taskRepository: { delete: remove } });
+
+      const response = await request(app).delete(`/api/tasks/${MALFORMED_ID}`);
+
+      expect(response.status).toBe(404);
+      expect(remove).not.toHaveBeenCalled();
+    });
+  });
+});
+
 /**
  * Each Transition endpoint, and the Status the machine calls its destination.
  * The table below is built from this and `LIFECYCLE`, so it covers every

@@ -41,6 +41,12 @@ can be changed and no further Transition is possible. It still appears in the
 list alongside every other Task.
 _Avoid_: Closed, deleted, hidden
 
+**Delete**:
+Removing a Task outright. Legal from every Status, `ARCHIVED` included, and it
+is not a Transition — the Task stops existing rather than moving. A second
+Delete of the same Task is reported as not found, never as a Replay.
+_Avoid_: Discard, purge, archive (that is a Status)
+
 **Version**:
 A counter raised on every change to a Task, used to detect that someone else
 changed the Task since it was read.

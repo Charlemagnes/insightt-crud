@@ -471,6 +471,77 @@ describe("createDrizzleTaskRepository", () => {
     });
   });
 
+  describe("delete", () => {
+    const query = {
+      userId: "auth0|owner",
+      id: "11111111-1111-4111-8111-111111111111",
+    };
+
+    it("deletes under a guard on the id and the Owner", async () => {
+      const { repository, statements } = recordingRepository([
+        [query.id],
+      ]);
+
+      await repository.delete(query);
+
+      const [deleted] = statements;
+      expect(normalise(deleted.text)).toContain('delete from "tasks"');
+      expect(normalise(deleted.text)).toContain(
+        '("tasks"."id" = $1 and "tasks"."owner_id" = $2)',
+      );
+      // Bound, not spliced, like every other Owner predicate here.
+      expect(deleted.values).toEqual([query.id, query.userId]);
+      expect(deleted.text).not.toContain(query.userId);
+    });
+
+    it("adds no Status predicate, because Delete is legal from all of them", async () => {
+      const { repository, statements } = recordingRepository([[query.id]]);
+
+      await repository.delete(query);
+
+      expect(statements[0].text).not.toContain('"status"');
+    });
+
+    it("takes no Version, so a delete cannot go stale", async () => {
+      const { repository, statements } = recordingRepository([[query.id]]);
+
+      await repository.delete(query);
+
+      expect(statements[0].text).not.toContain('"version"');
+    });
+
+    it("reports that a row went, and reads nothing more", async () => {
+      const { repository, statements } = recordingRepository([[query.id]]);
+
+      const deleted = await repository.delete(query);
+
+      expect(deleted).toBe(true);
+      // No follow-up read: unlike a refused Transition there is no second
+      // question to ask — either a row matched or there was none to match.
+      expect(statements).toHaveLength(1);
+    });
+
+    it("reports that none did", async () => {
+      const { repository, statements } = recordingRepository([]);
+
+      const deleted = await repository.delete(query);
+
+      expect(deleted).toBe(false);
+      expect(statements).toHaveLength(1);
+    });
+
+    it("reads back only the id, never the Task it removed", async () => {
+      const { repository, statements } = recordingRepository([[query.id]]);
+
+      await repository.delete(query);
+
+      // A deleted Task has nothing worth returning, and returning it would
+      // invite a caller to answer `200` with a Task that no longer exists.
+      expect(normalise(statements[0].text)).toContain('returning "id"');
+      expect(statements[0].text).not.toContain('"title"');
+    });
+  });
+
   describe("start", () => {
     const query = {
       userId: "auth0|owner",

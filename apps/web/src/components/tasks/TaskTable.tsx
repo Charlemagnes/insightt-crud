@@ -44,7 +44,7 @@ const columnsFor = (
     key: "actions",
     // Wide enough for every control a row shows — the disabled ones take up
     // the same space as the enabled ones.
-    width: 340,
+    width: 420,
     // The whole Task, not one field: which controls a row offers is a question
     // about its Status, and the mutations address it by id.
     render: (_: unknown, task: Task) => (

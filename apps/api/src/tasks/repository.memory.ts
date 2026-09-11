@@ -137,6 +137,19 @@ export function createMemoryTaskRepository(
       return { outcome: "changed", task: withoutOwner(task) };
     },
 
+    async delete(query: OwnerScopedTaskQuery): Promise<boolean> {
+      const task = owned(tasks, query);
+
+      if (!task) return false;
+
+      // Out of the array, not flagged: the real repository issues a `DELETE`,
+      // and a fake that hid the Task instead would let a list which forgot to
+      // filter on the flag pass here and leak the row in production.
+      tasks.splice(tasks.indexOf(task), 1);
+
+      return true;
+    },
+
     async start(query: OwnerScopedTaskQuery): Promise<TransitionResult> {
       return transition(tasks, query, "IN_PROGRESS");
     },

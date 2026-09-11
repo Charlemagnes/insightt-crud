@@ -154,6 +154,24 @@ export interface TaskRepository {
   update(edit: OwnerScopedTaskEdit): Promise<UpdateResult>;
 
   /**
+   * Removes a Task outright, and answers whether there was one to remove.
+   *
+   * No Status guard, and no `expectedVersion`. Delete is legal from every
+   * Status (PLAN.md §7), and a Version would only refuse a delete because the
+   * Task's title changed — a precondition that protects nothing, since the row
+   * the caller wants gone is the row that goes.
+   *
+   * `false` is both "no such Task" and "not yours", the same collapse
+   * `findById` makes: the route turns either into `404`, so no answer here can
+   * confirm that someone else's Task exists.
+   *
+   * A second delete of the same Task is `false`, not an error. Deleting is not
+   * idempotent the way Mark Done is — the Task is gone, and there is no longer
+   * anything to report success about (CONTEXT.md, "Delete").
+   */
+  delete(query: OwnerScopedTaskQuery): Promise<boolean>;
+
+  /**
    * Moves a `PENDING` Task to `IN_PROGRESS`, through one guarded statement.
    *
    * The Status it may be moved from is not a parameter: it is the Status the
