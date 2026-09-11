@@ -25,13 +25,14 @@ If a change contradicts any of the three, update the document in the same commit
 npm install                    # workspace install, from the root
 bash scripts/setup-auth0.sh    # one-time Auth0 tenant + env setup
 npm run dev                    # Express on :4000, Next on :3000, concurrently
-npm run build                  # production build (also the only full type-check)
+npm run build                  # production build; type-checks every workspace first
+npm run typecheck              # the same check plus cypress/, which is not a workspace
 npm run lint                   # fans out to each workspace; eslint flat config in apps/web
 npm run db:generate            # drizzle-kit — generate a migration from schema.ts
 npm run db:migrate             # apply migrations
 npm run db:seed -- '<user id>' # demo Tasks under one Owner; add 'replace' to clear theirs first
 npm run test                   # Jest, per workspace: apps/api, packages/shared, apps/web
-npm run test:e2e               # Cypress
+npm run test:e2e               # Cypress — boots both dev servers, runs the spec, stops them
 npm run docs:api               # z.toJSONSchema() -> docs/openapi.json
 ```
 
@@ -42,6 +43,7 @@ apps/web         Next.js 16 SPA — all pages are client components, one route: 
 apps/api         Express + TypeScript REST API (CommonJS)
 apps/api/drizzle SQL migrations — generated, plus hand-written `--custom` ones
 packages/shared  @insightt/shared — Zod schemas + the status transition rules
+cypress/         The one E2E spec, and the Auth0 sign-in that seeds it
 docs/adr/        Architecture decision records
 scripts/         setup-auth0.sh
 ```
@@ -103,6 +105,12 @@ v16 APIs differ from older releases.
 - **Not-owned tasks return `404`, never `403`**, so existence is not leaked.
 - **`412` means stale `If-Match`; `409` means an illegal transition.** They are
   different failures and the frontend branches on them.
+- **The E2E spec seeds the Auth0 SDK's storage; it never drives Universal
+  Login.** The token is minted with the Cypress client (the only one allowed the
+  Password Realm grant) and stored under the **SPA** client's cache key (the only
+  one the browser app reads). `cypress/support/auth0.ts` is the single file that
+  knows the SDK's storage layout, and an `@auth0/auth0-spa-js` major is what
+  breaks it.
 
 ## Agent skills
 

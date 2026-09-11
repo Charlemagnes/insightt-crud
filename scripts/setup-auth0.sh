@@ -358,13 +358,22 @@ NEXT_PUBLIC_API_URL=http://localhost:4000
 WEBENV
 printf '  %s✓ wrote%s apps/web/.env.local\n' "$GREEN" "$RESET"
 
+# Both client ids, and each is named for its client: Cypress mints the token
+# with the Regular Web App, then stores it under the SPA client's cache key,
+# which is the only key the browser app looks under.
+#
+# These key names changed when the E2E spec landed. A cypress.env.json written
+# by an older run of this script has no AUTH0_SPA_CLIENT_ID and spells the other
+# two AUTH0_CLIENT_ID / AUTH0_CLIENT_SECRET; it is overwritten below, and a
+# hand-edited one fails the spec by naming the key it is missing.
 cat > cypress.env.json <<CYENV
 {
   "AUTH0_DOMAIN": "$AUTH0_DOMAIN",
   "AUTH0_AUDIENCE": "$AUTH0_AUDIENCE",
   "AUTH0_REALM": "$AUTH0_REALM",
-  "AUTH0_CLIENT_ID": "$AUTH0_CYPRESS_CLIENT_ID",
-  "AUTH0_CLIENT_SECRET": "$AUTH0_CYPRESS_CLIENT_SECRET",
+  "AUTH0_SPA_CLIENT_ID": "$AUTH0_SPA_CLIENT_ID",
+  "AUTH0_CYPRESS_CLIENT_ID": "$AUTH0_CYPRESS_CLIENT_ID",
+  "AUTH0_CYPRESS_CLIENT_SECRET": "$AUTH0_CYPRESS_CLIENT_SECRET",
   "AUTH0_TEST_EMAIL": "$AUTH0_TEST_EMAIL",
   "AUTH0_TEST_PASSWORD": "$AUTH0_TEST_PASSWORD"
 }
@@ -394,6 +403,9 @@ fi
 
 say ""
 say "Verifying the Cypress credentials can actually mint a token..."
+# The same grant, realm and scope the E2E spec sends; keep this and
+# cypress/support/auth0.ts in step, or a tenant that passes setup still fails
+# the spec with an error that names neither file.
 RESPONSE=$(curl -s -X POST "https://$AUTH0_DOMAIN/oauth/token" \
   -H "Content-Type: application/json" \
   -d "{\"grant_type\":\"http://auth0.com/oauth/grant-type/password-realm\",\"realm\":\"$AUTH0_REALM\",\"username\":\"$AUTH0_TEST_EMAIL\",\"password\":\"$AUTH0_TEST_PASSWORD\",\"audience\":\"$AUTH0_AUDIENCE\",\"scope\":\"openid profile email offline_access\",\"client_id\":\"$AUTH0_CYPRESS_CLIENT_ID\",\"client_secret\":\"$AUTH0_CYPRESS_CLIENT_SECRET\"}" 2>/dev/null || true)
