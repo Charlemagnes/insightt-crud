@@ -37,8 +37,10 @@ _Avoid_: Status change, status update
 
 **Archived**:
 The terminal Status. An Archived Task is finished and put away: no field on it
-can be changed and no further Transition is possible. It still appears in the
-list alongside every other Task.
+can be changed and no further Transition is possible. Put away is also where it
+goes in the list — the list leaves Archived Tasks out until someone selects the
+Archived filter, which is the only thing that shows them. The row is untouched
+either way: this is a default, not a deletion.
 _Avoid_: Closed, deleted, hidden
 
 **Delete**:

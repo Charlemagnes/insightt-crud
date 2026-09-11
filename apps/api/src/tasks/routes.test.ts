@@ -156,14 +156,30 @@ describe("GET /api/tasks", () => {
       expect(response.body.total).toBe(1);
     });
 
-    it("shows Archived Tasks when no Status is asked for", async () => {
+    it("leaves Archived Tasks out when no Status is asked for", async () => {
       const archived = aTask({ status: "ARCHIVED" });
-      const { app } = harness({ tasks: [archived] });
+      const pending = aTask({ status: "PENDING" });
+      const { app } = harness({ tasks: [archived, pending] });
 
       const response = await request(app).get("/api/tasks");
 
-      // Archived is a Status, not a soft delete (CONTEXT.md, "Archived").
+      // Archived Tasks are put away, and the unfiltered list is the work still
+      // in front of the Owner (CONTEXT.md, "Archived").
+      expect(response.body.items).toEqual([asWireTask(pending)]);
+      // The count is of the same rows the page came from, so the pager cannot
+      // offer a page of Tasks the list will not show.
+      expect(response.body.total).toBe(1);
+    });
+
+    it("shows Archived Tasks when the Archived Status is asked for", async () => {
+      const archived = aTask({ status: "ARCHIVED" });
+      const { app } = harness({ tasks: [archived, aTask({ status: "DONE" })] });
+
+      const response = await request(app).get("/api/tasks?status=ARCHIVED");
+
+      // Not hidden, not deleted — just not selected until asked for by name.
       expect(response.body.items).toEqual([asWireTask(archived)]);
+      expect(response.body.total).toBe(1);
     });
 
     it("rejects a page size beyond the cap as VALIDATION_FAILED", async () => {
@@ -1353,15 +1369,28 @@ describe("POST /api/tasks/:id/archive", () => {
     expect(response.body.completedAt).toBe("2026-02-01T00:00:00.000Z");
   });
 
-  it("leaves the archived Task in the list", async () => {
+  it("takes the archived Task out of the unfiltered list", async () => {
     const task = finished();
     const { app } = harness({ tasks: [task] });
 
     await request(app).post(`/api/tasks/${task.id}/archive`);
     const list = await request(app).get("/api/tasks");
 
-    // Archived is a Status, not a soft delete and not a hidden state
-    // (CONTEXT.md, "Archived"). An unfiltered list still shows it.
+    // Archiving files the Task away, and the list a person works from is what
+    // it is filed away from (CONTEXT.md, "Archived").
+    expect(list.body.items).toEqual([]);
+    expect(list.body.total).toBe(0);
+  });
+
+  it("keeps it reachable through the Archived filter", async () => {
+    const task = finished();
+    const { app } = harness({ tasks: [task] });
+
+    await request(app).post(`/api/tasks/${task.id}/archive`);
+    const list = await request(app).get("/api/tasks?status=ARCHIVED");
+
+    // Which is what makes the line above a default and not a soft delete: the
+    // row is still there, and one filter away.
     expect(idsOf(list.body.items)).toEqual([task.id]);
     expect(list.body.items[0].status).toBe("ARCHIVED");
     expect(list.body.total).toBe(1);
@@ -1467,9 +1496,9 @@ describe("DELETE /api/tasks/:id", () => {
     await request(app).delete(`/api/tasks/${deleted.id}`);
     const list = await request(app).get("/api/tasks");
 
-    // Unlike Archived, which is a Status the list still shows, a deleted Task
-    // is gone — and `total` has to say so, or the pager offers a page that is
-    // no longer there.
+    // Unlike Archived, which leaves the list but stays one filter away, a
+    // deleted Task is gone — and `total` has to say so, or the pager offers a
+    // page that is no longer there.
     expect(idsOf(list.body.items)).toEqual([kept.id]);
     expect(list.body.total).toBe(1);
   });

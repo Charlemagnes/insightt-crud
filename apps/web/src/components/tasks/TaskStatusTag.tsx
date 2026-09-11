@@ -3,16 +3,24 @@
 import type { TaskStatus } from "@insightt/shared";
 import { Tag } from "antd";
 
+import { ALL_STATUSES, type StatusFilter } from "@/api/tasks";
+
 /**
  * How each Status reads to a person. The enum values are the wire's spelling,
  * not a label — `IN_PROGRESS` shouted in a table cell is the database leaking
  * into the interface.
  *
- * Exported because the Status filter offers the same four words, and a second
+ * Exported because the Status filter offers the same words, and a second
  * mapping would let a tag and the option that selects it disagree about what
  * the Status is called.
+ *
+ * `ALL_STATUSES` is in here for that reason and no other: it is the one thing
+ * the filter offers that is not a Status, and leaving it out would mean the
+ * control read four of its five labels from one place and wrote the fifth
+ * itself. No tag ever renders it — a Task is never in it.
  */
-export const STATUS_LABELS: Record<TaskStatus, string> = {
+export const STATUS_LABELS: Record<StatusFilter, string> = {
+  [ALL_STATUSES]: "All",
   PENDING: "Pending",
   IN_PROGRESS: "In progress",
   DONE: "Done",

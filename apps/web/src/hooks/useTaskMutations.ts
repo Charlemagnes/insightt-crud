@@ -96,16 +96,23 @@ export function useMarkTaskDone() {
 }
 
 /**
- * Archiving a Task. The row shows `ARCHIVED` before the API confirms it, and
- * stays in the list either way — archiving files a Task away, it does not
- * remove it, so there is no row to take out optimistically.
+ * Archiving a Task. The row goes immediately, like a delete, and comes back if
+ * the request fails.
+ *
+ * The Task is not gone — archiving files it away, and the Archived filter still
+ * finds it — but it is gone from *here*. A Task can only be archived from `DONE`,
+ * and no list that shows a `DONE` Task also shows an `ARCHIVED` one: the Done
+ * filter has moved past it, and an unfiltered list leaves Archived out. Leaving
+ * the row in place with a new tag would show a state the list it is sitting in
+ * does not represent, for exactly as long as the refetch takes to remove it.
+ *
+ * So there is no response to correct the page from, and none is asked for —
+ * `onSettled` invalidates, and the server has the last word on `total`.
  */
 export function useArchiveTask() {
-  return useTaskRowMutation({
+  return useOptimisticPage<string, Task>({
     run: archiveTask,
-    idOf: identity,
-    inFlight: (task) => ({ ...task, status: "ARCHIVED" }),
-    taskIn: (task) => task,
+    inFlight: withoutRow,
   });
 }
 

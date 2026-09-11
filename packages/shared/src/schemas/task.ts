@@ -183,8 +183,11 @@ export const TASK_PAGE = {
  * The `GET /api/tasks` query string. `z.coerce` because a query string arrives
  * as text — `?page=2` is `"2"` until something says otherwise.
  *
- * `status` has no default: an unfiltered list shows every Status, Archived
- * included. Archived is a Status, not a soft delete (CONTEXT.md, "Archived").
+ * `status` has no default, and leaving it out is not the same as asking for
+ * everything: the list then shows every Status **except** `ARCHIVED`, because
+ * an Archived Task is finished and put away (CONTEXT.md, "Archived"). It is
+ * still a Status and not a soft delete — `?status=ARCHIVED` asks for those
+ * Tasks by name, and is the only thing that shows them.
  */
 export const TaskListQuery = z.object({
   page: z.coerce.number().int().min(TASK_PAGE.first).default(TASK_PAGE.first),

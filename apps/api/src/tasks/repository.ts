@@ -1,6 +1,16 @@
 import type { Task, TaskStatus, UpdateTaskInput } from "@insightt/shared";
 
 /**
+ * The one Status a list leaves out unless it is asked for by name.
+ *
+ * An Archived Task is finished and put away (CONTEXT.md, "Archived"), so the
+ * list a person works from is the work still in front of them rather than
+ * everything they have ever done. This is a default and not a deletion: the row
+ * is untouched, and `?status=ARCHIVED` brings it back.
+ */
+export const SHOWN_ONLY_WHEN_ASKED_FOR: TaskStatus = "ARCHIVED";
+
+/**
  * What a list read needs to know. Every read is scoped to one Owner, which is
  * why the Actor's `userId` sits inside the query rather than beside it — there
  * is no way to spell a read that forgets it.
@@ -13,7 +23,7 @@ export interface OwnerScopedListQuery {
   userId: string;
   page: number;
   pageSize: number;
-  /** Absent means every Status, Archived included. */
+  /** Absent means every Status except `SHOWN_ONLY_WHEN_ASKED_FOR`. */
   status?: TaskStatus;
 }
 
@@ -118,7 +128,13 @@ export type MarkDoneResult =
  * Actor before it will accept the call.
  */
 export interface TaskRepository {
-  /** One page of the Owner's Tasks, newest first, with the total count. */
+  /**
+   * One page of the Owner's Tasks, newest first, with the total count.
+   *
+   * An unasked-for `status` narrows nothing except Archived, which is left out
+   * — see `SHOWN_ONLY_WHEN_ASKED_FOR`. `total` counts the same rows the page
+   * was taken from, so the pager never sizes itself off Tasks it will not show.
+   */
   list(query: OwnerScopedListQuery): Promise<TaskListResult>;
 
   /**
@@ -184,10 +200,10 @@ export interface TaskRepository {
    * `start` uses — the Status it may be moved from again comes from the shared
    * machine rather than from the caller.
    *
-   * Archiving is not a delete. The row stays, the Task keeps its completion
-   * time, and it goes on appearing in the Owner's list (CONTEXT.md,
-   * "Archived"). What changes is that `ARCHIVED` is terminal, so this is the
-   * last Transition the Task has.
+   * Archiving is not a delete. The row stays and the Task keeps its completion
+   * time (CONTEXT.md, "Archived"). What changes is that `ARCHIVED` is terminal,
+   * so this is the last Transition the Task has, and that the Task drops out of
+   * the list until someone asks for Archived — see `SHOWN_ONLY_WHEN_ASKED_FOR`.
    */
   archive(query: OwnerScopedTaskQuery): Promise<TransitionResult>;
 

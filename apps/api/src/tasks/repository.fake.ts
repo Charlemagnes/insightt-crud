@@ -20,16 +20,17 @@ import { canTransition, type Task, type TaskStatus } from "@insightt/shared";
 
 import { randomUUID } from "node:crypto";
 
-import type {
-  MarkDoneResult,
-  OwnerScopedListQuery,
-  OwnerScopedTaskDraft,
-  OwnerScopedTaskEdit,
-  OwnerScopedTaskQuery,
-  TaskListResult,
-  TaskRepository,
-  TransitionResult,
-  UpdateResult,
+import {
+  SHOWN_ONLY_WHEN_ASKED_FOR,
+  type MarkDoneResult,
+  type OwnerScopedListQuery,
+  type OwnerScopedTaskDraft,
+  type OwnerScopedTaskEdit,
+  type OwnerScopedTaskQuery,
+  type TaskListResult,
+  type TaskRepository,
+  type TransitionResult,
+  type UpdateResult,
 } from "@/tasks/repository";
 
 /** A Task as it is stored: the wire shape, plus the Owner the wire never sees. */
@@ -78,7 +79,14 @@ export function createFakeTaskRepository(
     }: OwnerScopedListQuery): Promise<TaskListResult> {
       const owned = tasks
         .filter((task) => task.ownerId === userId)
-        .filter((task) => status === undefined || task.status === status)
+        // The same two-armed predicate the SQL uses: a Status asked for is
+        // matched exactly, and no Status leaves Archived out rather than
+        // filtering on nothing.
+        .filter((task) =>
+          status === undefined
+            ? task.status !== SHOWN_ONLY_WHEN_ASKED_FOR
+            : task.status === status,
+        )
         // Newest first, with `id` breaking a tie exactly as the SQL does. A
         // fake that ordered differently would let a paging bug pass here and
         // fail in production.
@@ -171,9 +179,9 @@ export function createFakeTaskRepository(
     },
 
     async archive(query: OwnerScopedTaskQuery): Promise<TransitionResult> {
-      // Nothing is cleared and nothing is hidden: the Task keeps its
-      // completion time and stays in the list, exactly as `list` above finds
-      // every other Status.
+      // Nothing is cleared and nothing is removed: the Task keeps its
+      // completion time and stays in the array. What changes is that `list`
+      // above no longer selects it unless Archived is the Status asked for.
       return transition(tasks, query, "ARCHIVED");
     },
 

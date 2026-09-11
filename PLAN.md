@@ -306,8 +306,10 @@ raising it for a write that changed nothing would invalidate every other tab's
 **Pagination.** Offset-based, since Ant Design's `Table` needs a total count.
 The list query selects `count(*) over() as total` alongside the rows, so one
 round trip returns both. `page` defaults to 1; `pageSize` defaults to 10 and
-caps at 100; `status` is optional with **no default**, so the list shows every
-status unless filtered. Ordering is fixed `created_at desc`, with `id desc`
+caps at 100; `status` is optional with **no default**, and omitting it is not
+the same as asking for everything: the list then shows every status except
+`ARCHIVED`. `?status=ARCHIVED` is what asks for archived tasks, and is the only
+thing that returns them. Ordering is fixed `created_at desc`, with `id desc`
 breaking the tie — two tasks can share a `created_at` to the microsecond, and on
 an ordering that is not total Postgres may return them in either order, so the
 same row shows up on two pages or on none.
@@ -377,7 +379,12 @@ honest, and the one in the statement is what makes the write safe.
 
 Delete is unrestricted because the brief says "Delete Task" flat; inventing a
 restriction it does not ask for would be a worse deviation than allowing it.
-`ARCHIVED` is not hidden from the list — it is a status, not a soft delete.
+
+`ARCHIVED` is left out of an unfiltered list, and reachable through the
+`ARCHIVED` filter. That is a default, not a soft delete: the row is not flagged,
+not hidden from `GET /api/tasks/:id`, and not excluded from anything else. What
+it is excluded from is the list a person works out of, which is the work still
+in front of them rather than everything they have ever finished.
 
 ---
 
@@ -695,10 +702,14 @@ question about counts and ordering that only the server can answer.
 
 **Mutation policy.**
 
-- Per-row mutations (`PATCH`, `/start`, `/done`, `/archive`) are
-  **optimistic**: `onMutate` snapshots the cache, `onError` restores it, and
-  `onSuccess` overwrites the row from the response body so `version`
-  self-corrects and the next `If-Match` is never stale.
+- Per-row mutations (`PATCH`, `/start`, `/done`) are **optimistic**: `onMutate`
+  snapshots the cache, `onError` restores it, and `onSuccess` overwrites the row
+  from the response body so `version` self-corrects and the next `If-Match` is
+  never stale.
+- **`/archive` is page-shaped, like `DELETE`.** A task can only be archived from
+  `DONE`, and no list showing a `DONE` task also shows an `ARCHIVED` one — the
+  `DONE` filter has moved past it, and an unfiltered list excludes `ARCHIVED`.
+  So the row comes out rather than changing tag, and comes back on failure.
 - **`DELETE` is optimistic too, but page-shaped rather than row-shaped.** The
   row is taken out and `total` lowered with it, so the pager cannot offer a page
   that is no longer there. There is no `onSuccess` correction: a `204` carries

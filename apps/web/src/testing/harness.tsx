@@ -21,6 +21,7 @@ import { TASK_PAGE, type Task, type TaskPage } from "@insightt/shared";
 import { render, type RenderResult } from "@testing-library/react";
 import { http, HttpResponse, type RequestHandler } from "msw";
 
+import { ALL_STATUSES } from "@/api/tasks";
 import { TaskListScreen } from "@/components/tasks/TaskListScreen";
 import { config } from "@/config";
 import { AntdProvider } from "@/providers/Antd";
@@ -45,7 +46,7 @@ const SESSION = {
 const FRESH_VIEW = {
   page: TASK_PAGE.first,
   pageSize: TASK_PAGE.defaultSize,
-  status: null,
+  status: ALL_STATUSES,
   formTarget: null,
 };
 
@@ -88,9 +89,9 @@ export function aTask(overrides: Partial<Task> = {}): Task {
  * invalidates, and a fake that replayed the original page would hand the old
  * row straight back and make a passing assertion impossible to trust.
  *
- * `/start` and `/archive` are deliberately absent: no test presses them, and
- * MSW is configured to fail on a request it has no handler for, so the day one
- * does the gap says so rather than answering wrongly.
+ * `/start` is deliberately absent: no test presses it, and MSW is configured to
+ * fail on a request it has no handler for, so the day one does the gap says so
+ * rather than answering wrongly.
  */
 export interface FakeTaskApi {
   handlers: RequestHandler[];
@@ -145,8 +146,11 @@ export function fakeTaskApi(): FakeTaskApi {
         const page = Number(query.get("page") ?? TASK_PAGE.first);
         const pageSize = Number(query.get("pageSize") ?? TASK_PAGE.defaultSize);
 
-        const matching = tasks.filter(
-          (task) => status === null || task.status === status,
+        // No `status` is not "no filter": the real endpoint leaves Archived
+        // out until it is asked for by name, and a fake that returned it would
+        // let the screen pass a test the API would fail.
+        const matching = tasks.filter((task) =>
+          status === null ? task.status !== "ARCHIVED" : task.status === status,
         );
         // Newest first, which is the ordering the real endpoint is fixed at
         // (PLAN.md §6). A fake that paged in insertion order would let an
@@ -190,6 +194,27 @@ export function fakeTaskApi(): FakeTaskApi {
         }
 
         return HttpResponse.json(store(completed(task)));
+      }),
+
+      // Archiving is the one Transition the list's own filter notices: the Task
+      // is stored exactly as before with a new Status, and `GET /api/tasks`
+      // above stops returning it.
+      http.post<{ id: string }>(url("/api/tasks/:id/archive"), ({ params }) => {
+        const task = find(params.id);
+
+        if (!task) return refusal(404, "NOT_FOUND", "Task not found");
+
+        if (task.status !== "DONE") {
+          return refusal(
+            409,
+            "INVALID_TRANSITION",
+            `A ${task.status} task cannot become ARCHIVED`,
+          );
+        }
+
+        return HttpResponse.json(
+          store({ ...task, status: "ARCHIVED", version: task.version + 1 }),
+        );
       }),
     ],
   };

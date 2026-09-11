@@ -3,33 +3,28 @@
 import { TaskStatus } from "@insightt/shared";
 import { Select, Space, Typography } from "antd";
 
+import { ALL_STATUSES, type StatusFilter } from "@/api/tasks";
 import { STATUS_LABELS } from "@/components/tasks/TaskStatusTag";
 import { useTaskListStore } from "@/stores/taskList";
 
 const { Text } = Typography;
 
 /**
- * The value that stands for "no filter". `null` is what the store and the API
- * both mean by it, but a `Select` reads `null` as nothing chosen and falls back
- * to its placeholder — which would leave the control blank rather than saying
- * what the unfiltered list is showing.
+ * Everything the filter offers: every Status in lifecycle order, behind the one
+ * value that asks for all of them.
+ *
+ * The Statuses come off `TaskStatus.options` rather than a list written here,
+ * so one added to the machine appears in the filter without anyone remembering
+ * to add it — and every label comes off `STATUS_LABELS`, including `ALL`, so
+ * the control cannot call a Status something a tag does not.
+ *
+ * Archived is one of the options, and selecting it is the only way to see an
+ * Archived Task: the list leaves them out until this control asks for them.
  */
-const EVERY_STATUS = "ALL";
-
-type FilterValue = typeof EVERY_STATUS | TaskStatus;
-
-/**
- * The options, in lifecycle order, off `TaskStatus.options` rather than a list
- * written here — a Status added to the machine appears in the filter without
- * anyone remembering to add it.
- */
-const OPTIONS: { value: FilterValue; label: string }[] = [
-  { value: EVERY_STATUS, label: "All statuses" },
-  ...TaskStatus.options.map((status) => ({
-    value: status,
-    label: STATUS_LABELS[status],
-  })),
-];
+const OPTIONS: { value: StatusFilter; label: string }[] = [
+  ALL_STATUSES,
+  ...TaskStatus.options,
+].map((status) => ({ value: status, label: STATUS_LABELS[status] }));
 
 /**
  * Narrows the list to one Status (PLAN.md §6).
@@ -46,14 +41,17 @@ export function TaskFilters() {
   return (
     <Space size="small">
       <Text type="secondary">Status</Text>
-      <Select<FilterValue>
-        value={status ?? EVERY_STATUS}
+      <Select<StatusFilter>
+        value={status}
         options={OPTIONS}
-        onChange={(value) =>
-          filterByStatus(value === EVERY_STATUS ? null : value)
-        }
-        style={{ width: 160 }}
+        onChange={filterByStatus}
+        style={{ width: 180 }}
         aria-label="Filter by status"
+        // Five options do not need a windowed list, and virtualising them
+        // costs something real: the `listbox` Ant Design exposes to assistive
+        // technology mirrors the window rather than the options, so a screen
+        // reader is offered whichever two happen to be scrolled into view.
+        virtual={false}
       />
     </Space>
   );

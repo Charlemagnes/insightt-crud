@@ -1,5 +1,7 @@
-import { TASK_PAGE, type TaskStatus } from "@insightt/shared";
+import { TASK_PAGE } from "@insightt/shared";
 import { create } from "zustand";
+
+import { ALL_STATUSES, type StatusFilter } from "@/api/tasks";
 
 /**
  * What the Task form is open for: a new Task, an existing one, or nothing.
@@ -28,20 +30,20 @@ export type TaskFormTarget =
 interface TaskListState {
   page: number;
   pageSize: number;
-  /** `null` is every Status. The list is unfiltered until someone narrows it. */
-  status: TaskStatus | null;
+  /** `ALL_STATUSES` until someone narrows it, which is where the list starts. */
+  status: StatusFilter;
   formTarget: TaskFormTarget;
   /** Moves the pager. Ant Design reports both numbers, so both are taken. */
   goToPage: (page: number, pageSize: number) => void;
   /**
-   * Narrows the list, or widens it again with `null`.
+   * Narrows the list, or widens it again with `ALL_STATUSES`.
    *
    * **Always back to the first page.** The page number counts into a result set
    * the filter has just replaced: page 4 of every Task is not page 4 of the
    * Archived ones, and keeping it lands the person on a page that may not
    * exist, which reads as a filter that found nothing.
    */
-  filterByStatus: (status: TaskStatus | null) => void;
+  filterByStatus: (status: StatusFilter) => void;
   openCreate: () => void;
   openEdit: (taskId: string) => void;
   closeForm: () => void;
@@ -50,7 +52,7 @@ interface TaskListState {
 export const useTaskListStore = create<TaskListState>((set) => ({
   page: TASK_PAGE.first,
   pageSize: TASK_PAGE.defaultSize,
-  status: null,
+  status: ALL_STATUSES,
   formTarget: null,
   goToPage: (page, pageSize) => set({ page, pageSize }),
   filterByStatus: (status) => set({ status, page: TASK_PAGE.first }),

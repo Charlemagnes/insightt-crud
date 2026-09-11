@@ -123,16 +123,16 @@ npm run db:seed -- '<user id>'
 
 JSON REST, every route behind a valid Auth0 access token.
 
-| Method   | Path                     | Purpose                                         | Success                                    |
-| -------- | ------------------------ | ----------------------------------------------- | ------------------------------------------ |
-| `GET`    | `/api/tasks`             | Owner-scoped list; `page`, `pageSize`, `status` | `200` + `{ items, page, pageSize, total }` |
-| `GET`    | `/api/tasks/:id`         | One Task                                        | `200` + `Task` + `ETag`                    |
-| `POST`   | `/api/tasks`             | Create, always `PENDING`                        | `201` + `Task`                             |
-| `PATCH`  | `/api/tasks/:id`         | Edit title/description; requires `If-Match`     | `200` + `Task`                             |
-| `POST`   | `/api/tasks/:id/start`   | `PENDING → IN_PROGRESS`                         | `200` + `Task`                             |
-| `POST`   | `/api/tasks/:id/done`    | `IN_PROGRESS → DONE`, idempotent                | `200` + `Task`                             |
-| `POST`   | `/api/tasks/:id/archive` | `DONE → ARCHIVED`                               | `200` + `Task`                             |
-| `DELETE` | `/api/tasks/:id`         | Delete, legal from any Status                   | `204`                                      |
+| Method   | Path                     | Purpose                                                                          | Success                                    |
+| -------- | ------------------------ | -------------------------------------------------------------------------------- | ------------------------------------------ |
+| `GET`    | `/api/tasks`             | Owner-scoped list; `page`, `pageSize`, `status`. No `status` excludes `ARCHIVED` | `200` + `{ items, page, pageSize, total }` |
+| `GET`    | `/api/tasks/:id`         | One Task                                                                         | `200` + `Task` + `ETag`                    |
+| `POST`   | `/api/tasks`             | Create, always `PENDING`                                                         | `201` + `Task`                             |
+| `PATCH`  | `/api/tasks/:id`         | Edit title/description; requires `If-Match`                                      | `200` + `Task`                             |
+| `POST`   | `/api/tasks/:id/start`   | `PENDING → IN_PROGRESS`                                                          | `200` + `Task`                             |
+| `POST`   | `/api/tasks/:id/done`    | `IN_PROGRESS → DONE`, idempotent                                                 | `200` + `Task`                             |
+| `POST`   | `/api/tasks/:id/archive` | `DONE → ARCHIVED`                                                                | `200` + `Task`                             |
+| `DELETE` | `/api/tasks/:id`         | Delete, legal from any Status                                                    | `204`                                      |
 
 Transitions are dedicated endpoints rather than `PATCH { status }`, and
 `status` is absent from every input schema. That is what keeps the Postgres
@@ -400,9 +400,10 @@ this runs it. That is the decision the Vercel and Edge Function options were
 measured against, and it is why the env files are written by a wizard rather
 than injected by a platform.
 
-**`Archived` is a Status, not a soft delete.** An Archived Task still appears in
-the list alongside every other one, and Delete remains legal from every Status.
-Two different operations, deliberately not collapsed into one.
+**`Archived` is a Status, not a soft delete.** The list leaves Archived Tasks
+out until the Archived filter asks for them, but the row is untouched: nothing
+is flagged, `GET /api/tasks/:id` still returns it, and Delete remains legal from
+every Status. Two different operations, deliberately not collapsed into one.
 
 ---
 

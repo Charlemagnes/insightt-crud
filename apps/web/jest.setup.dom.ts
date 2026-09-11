@@ -50,3 +50,49 @@ Object.defineProperty(window, "matchMedia", {
 const computedStyle = window.getComputedStyle.bind(window);
 
 window.getComputedStyle = (element: Element) => computedStyle(element);
+
+/**
+ * antd's `Select` measures its open dropdown with a `ResizeObserver`, which
+ * jsdom does not implement — so the Status filter throws the moment a test
+ * opens it.
+ *
+ * It observes nothing, which is the honest answer rather than a shortcut: jsdom
+ * reports every box as zero, so a real implementation would deliver zeroes too.
+ */
+class NoopResizeObserver implements ResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+globalThis.ResizeObserver ??= NoopResizeObserver;
+
+/**
+ * The same `Select` defers opening and closing by a macrotask, and spells that
+ * macrotask as a `MessageChannel` — it posts on one port and does the work in
+ * the other's `onmessage` (`@rc-component/select/lib/hooks/useOpen`). jsdom has
+ * no `MessageChannel`, so the click throws before the dropdown ever mounts.
+ *
+ * **Node's own is the wrong one**, even though it is a real implementation.
+ * Its ports deliver on Node's event loop rather than jsdom's and they keep that
+ * loop alive, so the deferred work lands nowhere `act` is watching and the run
+ * hangs instead of failing — several minutes of nothing, rather than an error.
+ *
+ * `setTimeout` is the macrotask jsdom and Jest already agree on, so the message
+ * arrives where `userEvent`'s `await` is looking for it. Only the two members
+ * the hook touches are implemented; the cast is what says so out loud.
+ */
+class MacroTaskChannel {
+  readonly port1: { onmessage: ((event: { data: unknown }) => void) | null } = {
+    onmessage: null,
+  };
+
+  readonly port2 = {
+    postMessage: (data: unknown) => {
+      setTimeout(() => this.port1.onmessage?.({ data }), 0);
+    },
+  };
+}
+
+globalThis.MessageChannel ??=
+  MacroTaskChannel as unknown as typeof MessageChannel;

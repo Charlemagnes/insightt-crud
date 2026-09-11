@@ -292,8 +292,9 @@ export function buildOpenApiDocument(): OpenApiDocument {
         get: {
           summary: "List the Actor's Tasks",
           description:
-            "Owner-scoped, newest first. `status` has no default: an " +
-            "unfiltered list shows every Status, Archived included.",
+            "Owner-scoped, newest first. Omitting `status` shows every " +
+            "Status except `ARCHIVED`; `status=ARCHIVED` is what asks for " +
+            "Archived Tasks, and is the only thing that returns them.",
           operationId: "listTasks",
           parameters: listQueryParameters(),
           responses: {

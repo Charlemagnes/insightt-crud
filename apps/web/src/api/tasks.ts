@@ -20,17 +20,31 @@ import {
 const TRANSITION_REQUEST: RequestInit = { method: "POST" };
 
 /**
+ * The Status filter set to "everything the list shows".
+ *
+ * It is a value and not an absence, because a view always has an answer to what
+ * it is filtered to: an absent property would make "unfiltered" and "not decided
+ * yet" the same thing, which is how a filter reset goes missing. It is also the
+ * one value the control can display, where `null` would leave the Select blank.
+ *
+ * Not a Status: the enum has no `ALL`, and this never reaches the wire — see
+ * `listTasks`, which is the one place that knows to leave it out.
+ */
+export const ALL_STATUSES = "ALL" as const;
+
+/** What the Status filter holds: one Status, or every Status. */
+export type StatusFilter = TaskStatus | typeof ALL_STATUSES;
+
+/**
  * Which page of Tasks to read, and how to narrow it — the shared query schema's
  * own fields, not a second copy of them (PLAN.md §11).
  *
  * `status` is the one field that differs, and only in how "no filter" is
  * spelled. The schema has it optional because a query string says so by leaving
- * the key out; a view has to hold an answer either way, and `null` is that
- * answer — an absent property would make "unfiltered" and "not decided yet" the
- * same value, which is how a filter reset goes missing.
+ * the key out; a view says it with `ALL_STATUSES`.
  */
 export type TaskListParams = Omit<TaskListQuery, "status"> & {
-  status: TaskStatus | null;
+  status: StatusFilter;
 };
 
 /** One page of the Actor's own Tasks, newest first. */
@@ -44,10 +58,10 @@ export function listTasks({
     pageSize: String(pageSize),
   });
 
-  // Omitted rather than sent empty: `?status=` is a Status the enum does not
-  // have and would be refused as `422`, where no key at all is the unfiltered
-  // list the API already defaults to.
-  if (status !== null) {
+  // `ALL` is dropped rather than sent: it is not a Status the enum has, so the
+  // API would refuse it as `422`, and no key at all is the unfiltered list it
+  // already defaults to. Every other value is a Status and travels as one.
+  if (status !== ALL_STATUSES) {
     query.set("status", status);
   }
 

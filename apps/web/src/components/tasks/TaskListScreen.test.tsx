@@ -42,12 +42,29 @@ function buttonIn(title: string, label: string): HTMLElement {
   return within(rowFor(title)).getByRole("button", { name: label });
 }
 
+/**
+ * Narrows the list the way a person does: open the Status control and pick an
+ * option. Going through the control rather than the store is the point — what
+ * is being checked is that choosing Archived is what surfaces Archived Tasks.
+ *
+ * The option is found by role and not by text: every Status label also appears
+ * as a tag inside a row, and a bare text query would find the wrong one. That
+ * the role is there at all is what `virtual={false}` on the control buys — a
+ * windowed list gives the role to two placeholder nodes instead.
+ */
+async function filterBy(label: string): Promise<void> {
+  await userEvent.click(
+    screen.getByRole("combobox", { name: "Filter by status" }),
+  );
+  await userEvent.click(await screen.findByRole("option", { name: label }));
+}
+
 describe("the task list", () => {
   it("renders the Tasks the API returned", async () => {
     api.reset([
       aTask({ title: "Write the plan", status: "PENDING" }),
       aTask({ title: "Ship the API", status: "IN_PROGRESS" }),
-      aTask({ title: "Retire the spike", status: "ARCHIVED" }),
+      aTask({ title: "Bank the result", status: "DONE" }),
     ]);
 
     renderTaskList();
@@ -57,8 +74,52 @@ describe("the task list", () => {
       within(rowFor("Ship the API")).getByText("In progress"),
     ).toBeInTheDocument();
     expect(
-      within(rowFor("Retire the spike")).getByText("Archived"),
+      within(rowFor("Bank the result")).getByText("Done"),
     ).toBeInTheDocument();
+  });
+
+  /**
+   * The list is the work still in front of the person, so an Archived Task is
+   * filed away rather than listed (CONTEXT.md, "Archived"). Both halves are one
+   * test on purpose: "it is missing" and "it is missing because it was
+   * deleted" look identical until the filter brings it back.
+   */
+  it("hides Archived Tasks until the Archived filter asks for them", async () => {
+    api.reset([
+      aTask({ title: "Write the plan", status: "PENDING" }),
+      aTask({ title: "Retire the spike", status: "ARCHIVED" }),
+    ]);
+
+    renderTaskList();
+
+    expect(await screen.findByText("Write the plan")).toBeInTheDocument();
+    expect(screen.queryByText("Retire the spike")).not.toBeInTheDocument();
+
+    await filterBy("Archived");
+
+    expect(await screen.findByText("Retire the spike")).toBeInTheDocument();
+    expect(screen.queryByText("Write the plan")).not.toBeInTheDocument();
+  });
+
+  /**
+   * Archiving is the one Transition that takes the row out of the list it was
+   * clicked in: a `DONE` Task is archived from either the Done filter or the
+   * unfiltered list, and neither shows an Archived Task afterwards.
+   */
+  it("removes the row when a Done Task is archived", async () => {
+    api.reset([
+      aTask({ title: "Bank the result", status: "DONE" }),
+      aTask({ title: "Write the plan", status: "PENDING" }),
+    ]);
+
+    renderTaskList();
+    await screen.findByText("Bank the result");
+
+    await userEvent.click(buttonIn("Bank the result", "Archive"));
+
+    expect(await screen.findByText("Task archived")).toBeInTheDocument();
+    expect(screen.queryByText("Bank the result")).not.toBeInTheDocument();
+    expect(screen.getByText("Write the plan")).toBeInTheDocument();
   });
 
   it("re-renders the row as Done when an in-progress Task is marked done", async () => {
@@ -125,6 +186,10 @@ describe("the task list", () => {
    * Delete is asserted enabled on the terminal Status on purpose: it is the
    * counterpart to the rest of that row being greyed out, and without it the
    * assertion would also pass on a row that was disabled wholesale.
+   *
+   * The Archived row is reached through its filter, because that is the only
+   * place it appears — which is also why the loop runs per view rather than
+   * over one page holding all four.
    */
   it("disables the actions a row's Status makes impossible", async () => {
     const legal: Record<TaskStatus, string[]> = {
@@ -134,24 +199,7 @@ describe("the task list", () => {
       ARCHIVED: [],
     };
 
-    api.reset([
-      aTask({ title: "Write the plan", status: "PENDING" }),
-      aTask({ title: "Ship the API", status: "IN_PROGRESS" }),
-      aTask({ title: "Bank the result", status: "DONE" }),
-      aTask({ title: "Retire the spike", status: "ARCHIVED" }),
-    ]);
-
-    renderTaskList();
-    await screen.findByText("Write the plan");
-
-    const rows: [string, TaskStatus][] = [
-      ["Write the plan", "PENDING"],
-      ["Ship the API", "IN_PROGRESS"],
-      ["Bank the result", "DONE"],
-      ["Retire the spike", "ARCHIVED"],
-    ];
-
-    for (const [title, status] of rows) {
+    const expectRow = (title: string, status: TaskStatus) => {
       for (const label of ["Edit", "Start", "Mark done", "Archive"]) {
         // `toBeDisabled`, not the `disabled` property: it is the state assistive
         // technology reports, so a control turned off with `aria-disabled` alone
@@ -165,6 +213,25 @@ describe("the task list", () => {
 
       // Deletion is legal from every Status, `ARCHIVED` included (PLAN.md §7).
       expect(buttonIn(title, "Delete")).toBeEnabled();
-    }
+    };
+
+    api.reset([
+      aTask({ title: "Write the plan", status: "PENDING" }),
+      aTask({ title: "Ship the API", status: "IN_PROGRESS" }),
+      aTask({ title: "Bank the result", status: "DONE" }),
+      aTask({ title: "Retire the spike", status: "ARCHIVED" }),
+    ]);
+
+    renderTaskList();
+    await screen.findByText("Write the plan");
+
+    expectRow("Write the plan", "PENDING");
+    expectRow("Ship the API", "IN_PROGRESS");
+    expectRow("Bank the result", "DONE");
+
+    await filterBy("Archived");
+    await screen.findByText("Retire the spike");
+
+    expectRow("Retire the spike", "ARCHIVED");
   });
 });

@@ -1,6 +1,6 @@
 import { TASK_PAGE } from "@insightt/shared";
 
-import { listTasks, type TaskListParams } from "@/api/tasks";
+import { ALL_STATUSES, listTasks, type TaskListParams } from "@/api/tasks";
 import { config } from "@/config";
 import { useSessionStore } from "@/stores/session";
 
@@ -20,7 +20,7 @@ const EMPTY_PAGE = {
 const VIEW: TaskListParams = {
   page: TASK_PAGE.first,
   pageSize: TASK_PAGE.defaultSize,
-  status: null,
+  status: ALL_STATUSES,
 };
 
 /**
@@ -79,10 +79,10 @@ describe("listTasks", () => {
     expect(url.searchParams.get("status")).toBe("ARCHIVED");
   });
 
-  // `?status=` is a Status the enum does not have and the API answers `422`.
-  // Leaving the key out is what the unfiltered list already defaults to.
+  // `ALL` is not a Status the enum has, so sending it would be a `422`. Leaving
+  // the key out is what the unfiltered list already defaults to.
   it("omits the Status entirely when the list is unfiltered", async () => {
-    const url = await urlFor({ status: null });
+    const url = await urlFor({ status: ALL_STATUSES });
 
     expect(url.searchParams.has("status")).toBe(false);
   });

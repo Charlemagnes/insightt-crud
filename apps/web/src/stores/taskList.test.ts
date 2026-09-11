@@ -1,5 +1,6 @@
 import { TASK_PAGE } from "@insightt/shared";
 
+import { ALL_STATUSES } from "@/api/tasks";
 import { taskPageQueryKey, tasksQueryKey } from "@/hooks/useTasks";
 import { useTaskListStore } from "@/stores/taskList";
 
@@ -28,8 +29,8 @@ describe("the list view state", () => {
     });
   });
 
-  it("starts unfiltered, so the first list shows every Status", () => {
-    expect(view().status).toBeNull();
+  it("starts unfiltered, so the first list shows every Status it shows", () => {
+    expect(view().status).toBe(ALL_STATUSES);
   });
 
   it("starts with the form closed", () => {
@@ -67,9 +68,9 @@ describe("the Status filter", () => {
 
   it("widens it again, back to every Status", () => {
     useTaskListStore.getState().filterByStatus("IN_PROGRESS");
-    useTaskListStore.getState().filterByStatus(null);
+    useTaskListStore.getState().filterByStatus(ALL_STATUSES);
 
-    expect(view().status).toBeNull();
+    expect(view().status).toBe(ALL_STATUSES);
   });
 
   it("can select ARCHIVED, which is a Status and not a soft delete", () => {
@@ -91,7 +92,7 @@ describe("the Status filter", () => {
   it("goes back to the first page when the filter is cleared too", () => {
     useTaskListStore.getState().filterByStatus("ARCHIVED");
     useTaskListStore.getState().goToPage(4, TASK_PAGE.defaultSize);
-    useTaskListStore.getState().filterByStatus(null);
+    useTaskListStore.getState().filterByStatus(ALL_STATUSES);
 
     expect(view().page).toBe(TASK_PAGE.first);
   });
@@ -135,7 +136,7 @@ describe("the form target", () => {
     useTaskListStore.getState().goToPage(2, TASK_PAGE.defaultSize);
     useTaskListStore.getState().openEdit("task-1");
 
-    expect(view()).toMatchObject({ page: 2, status: null });
+    expect(view()).toMatchObject({ page: 2, status: ALL_STATUSES });
   });
 });
 

@@ -1,20 +1,21 @@
 import { statusBefore, TaskStatus, type Task } from "@insightt/shared";
-import { and, count, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, ne, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Database } from "@/db/client";
 import { tasks, type TaskRow } from "@/db/schema";
 import { toTask } from "@/tasks/mappers";
-import type {
-  MarkDoneResult,
-  OwnerScopedListQuery,
-  OwnerScopedTaskDraft,
-  OwnerScopedTaskEdit,
-  OwnerScopedTaskQuery,
-  TaskListResult,
-  TaskRepository,
-  TransitionResult,
-  UpdateResult,
+import {
+  SHOWN_ONLY_WHEN_ASKED_FOR,
+  type MarkDoneResult,
+  type OwnerScopedListQuery,
+  type OwnerScopedTaskDraft,
+  type OwnerScopedTaskEdit,
+  type OwnerScopedTaskQuery,
+  type TaskListResult,
+  type TaskRepository,
+  type TransitionResult,
+  type UpdateResult,
 } from "@/tasks/repository";
 
 /**
@@ -55,11 +56,15 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
       pageSize,
       status,
     }: OwnerScopedListQuery): Promise<TaskListResult> {
-      // `and` drops an `undefined`, so no `status` means every Status —
-      // Archived included, since it is a Status and not a soft delete.
+      // No `status` is still a predicate, not the absence of one: it means
+      // every Status except Archived, which a list shows only when asked for it
+      // by name. The row is not hidden, it is not selected — `?status=ARCHIVED`
+      // reaches it through the same `eq` every other Status uses.
       const owned: SQL | undefined = and(
         eq(tasks.ownerId, userId),
-        status === undefined ? undefined : eq(tasks.status, status),
+        status === undefined
+          ? ne(tasks.status, SHOWN_ONLY_WHEN_ASKED_FOR)
+          : eq(tasks.status, status),
       );
 
       // `count(*) over()` rides along on each row, so the page and the total

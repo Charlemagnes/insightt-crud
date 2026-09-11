@@ -158,20 +158,24 @@ describe("createDrizzleTaskRepository", () => {
 
       await repository.list({ userId: "auth0|owner", page: 3, pageSize: 25 });
 
-      // 25 to a page, third page: skip the first 50.
-      expect(statements[0].values).toEqual(["auth0|owner", 25, 50]);
+      // 25 to a page, third page: skip the first 50. `ARCHIVED` is the second
+      // bound value because an unfiltered list still names the Status it leaves
+      // out.
+      expect(statements[0].values).toEqual(["auth0|owner", "ARCHIVED", 25, 50]);
     });
 
-    it("adds no Status predicate when none was asked for", async () => {
+    it("excludes Archived when no Status was asked for", async () => {
       const { repository, statements } = recordingRepository([aListRow(1)]);
 
       await repository.list({ userId: "auth0|owner", page: 1, pageSize: 10 });
 
-      // Archived is a Status, not a soft delete: an unfiltered list shows it.
-      expect(statements[0].text).not.toContain('"status" =');
+      // No Status is still a predicate: Archived Tasks are put away, and the
+      // unfiltered list is the work still in front of the Owner.
+      expect(normalise(statements[0].text)).toContain('"tasks"."status" <> $2');
+      expect(statements[0].values).toContain("ARCHIVED");
     });
 
-    it("adds one when it was", async () => {
+    it("matches the Status exactly when one was asked for", async () => {
       const { repository, statements } = recordingRepository([aListRow(1)]);
 
       await repository.list({
@@ -194,8 +198,10 @@ describe("createDrizzleTaskRepository", () => {
       // and only the empty page — pays for a second statement.
       expect(statements).toHaveLength(2);
       expect(normalise(statements[1].text)).toContain("count(*)");
-      // Still Owner-scoped: the fallback must not total the whole table.
-      expect(statements[1].values).toEqual(["auth0|owner"]);
+      // Still Owner-scoped and still without the Archived rows: the fallback
+      // reuses the page's own predicate, so it cannot total a different set of
+      // Tasks than the page was taken from.
+      expect(statements[1].values).toEqual(["auth0|owner", "ARCHIVED"]);
     });
 
     it("keeps the Status filter on the fallback count", async () => {

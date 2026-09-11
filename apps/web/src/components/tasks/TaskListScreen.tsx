@@ -3,9 +3,11 @@
 import { Button, Flex, Layout } from "antd";
 import { useEffect } from "react";
 
+import { ALL_STATUSES } from "@/api/tasks";
 import { AppHeader } from "@/components/shared/AppHeader";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { TaskFilters } from "@/components/tasks/TaskFilters";
+import { STATUS_LABELS } from "@/components/tasks/TaskStatusTag";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
 import { TaskTable } from "@/components/tasks/TaskTable";
 import { useTasks } from "@/hooks/useTasks";
@@ -69,25 +71,26 @@ export function TaskListScreen() {
   // One question, asked once: a filtered list with no rows is not an empty
   // account, and offering to create a first Task there would answer a question
   // nobody asked — the Tasks exist, this Status has none.
-  const empty = status
-    ? {
-        description: "No tasks with this status.",
-        action: (
-          <Button onClick={() => filterByStatus(null)}>
-            Show all statuses
-          </Button>
-        ),
-      }
-    : {
-        description: "No tasks yet.",
-        // The same modal the button above opens, reached from the one place a
-        // person with no Tasks is actually looking.
-        action: (
-          <Button type="primary" onClick={openCreate}>
-            Create your first task
-          </Button>
-        ),
-      };
+  const empty =
+    status !== ALL_STATUSES
+      ? {
+          description: "No tasks with this status.",
+          action: (
+            <Button onClick={() => filterByStatus(ALL_STATUSES)}>
+              Show {STATUS_LABELS[ALL_STATUSES].toLowerCase()}
+            </Button>
+          ),
+        }
+      : {
+          description: "No tasks yet.",
+          // The same modal the button above opens, reached from the one place a
+          // person with no Tasks is actually looking.
+          action: (
+            <Button type="primary" onClick={openCreate}>
+              Create your first task
+            </Button>
+          ),
+        };
 
   return (
     <Layout style={{ minHeight: "100vh", background: "transparent" }}>
