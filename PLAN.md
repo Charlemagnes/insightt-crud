@@ -63,7 +63,7 @@ scripts only — it is not itself an app.
 apps/api/src/     index.ts  app.ts  env.ts
                   db/{client,schema,migrate,seed}.ts
                   middleware/{auth,logging,validate,errors}.ts
-                  tasks/   routes  service  mappers
+                  tasks/   routes  mappers
                            repository            (the interface)
                            repository.drizzle    (Postgres)
                            repository.fake       (the test fake)
@@ -758,24 +758,52 @@ Testing Library" is not achievable, since RTL renders DOM components and cannot
 exercise Express or Node code. Split accordingly, and the README says so, since
 that is the reviewer's most likely objection.
 
-**1. Unit — Jest, no RTL** (`packages/shared`, `apps/api`, and the non-rendering
-parts of `apps/web`)
-The transition validator and the `markAsDone` service against a mocked
-repository: every legal transition, every rejected transition, the already-DONE
-idempotent path, the non-owner path, and the per-status field whitelist. Plus a
-drift test asserting the shared machine permits exactly the transition
-`mark_task_done`'s SQL hardcodes — the rule is deliberately written in two
-languages (TypeScript for the pre-check and the UI, SQL for atomic enforcement),
-so a test has to hold them together.
+**1. Backend and shared — Jest, no RTL** (`packages/shared`, `apps/api`, and the
+non-rendering parts of `apps/web`)
 
-`apps/web` is the integration tier but not only that: the list's view state and
-the query string it becomes are plain modules, and testing them through a
-rendered table and a mock server would be three layers of machinery to assert
-that changing a filter resets the page. They live beside the code they test —
-`stores/taskList.test.ts` and `api/tasks.test.ts` — and run in the same Jest
-project.
+Two kinds of test, and the split is worth stating plainly rather than filing
+both under "unit".
 
-**2. Integration — Jest + React Testing Library + MSW** (`apps/web`)
+*Genuinely unit*: the transition validator and the schemas in
+`packages/shared`; `tasks/mappers.ts`, `env.ts` and the log formatter in
+`apps/api`. Pure functions, called directly. Plus a drift test asserting the
+shared machine permits exactly the transition `mark_task_done`'s SQL hardcodes
+— the rule is deliberately written in two languages (TypeScript for the
+pre-check and the UI, SQL for atomic enforcement), so a test has to hold them
+together.
+
+`apps/web` contributes to this tier as well as being the next one: the list's
+view state and the query string it becomes are plain modules, and testing them
+through a rendered table and a mock server would be three layers of machinery
+to assert that changing a filter resets the page. They live beside the code
+they test — `stores/taskList.test.ts` and `api/tasks.test.ts` — and run in the
+same Jest project.
+
+*Integration over HTTP*: every Task operation. **There is no `service.ts`** —
+an earlier draft of this plan put one between the route and the repository, and
+it was not built, because with the repository already an interface a service
+layer would have been a second seam doing the first one's job. The operations
+live in `tasks/routes.ts`, and `testing/harness.ts` enters them through the real
+`createApp` with supertest. The repository is the seam (`repository.fake.ts`
+behind the real interface) and the auth middleware is stubbed; everything
+between is real — CORS, the body parser, validation, the error mapper. Each
+legal Transition, each rejected one, the already-DONE Replay, the non-owner
+`404` and the per-Status field whitelist are all asserted there.
+
+Calling a handler directly instead would skip the parts most likely to be
+wrong, which is the same argument §3 makes for `createApp(deps)` existing at
+all. The cost is that the backend's domain rules have no unit test of their
+own, and the README owns that argument — see §16 and brief item 11.
+
+**Not covered anywhere**: `mark_task_done()` is never executed by an automated
+test. `db/mark-task-done.test.ts` reads the migration as text and checks it
+agrees with the TypeScript rule; no Jest test opens a Postgres connection, and
+the Cypress spec is read-only. The atomicity ADR-0002 exists to justify is
+therefore argued, not demonstrated. Closing it needs a containerised Postgres
+running the migrations — out of the 24-hour budget, and named here rather than
+left for a reviewer to notice.
+
+**2. Frontend integration — Jest + React Testing Library + MSW** (`apps/web`)
 `TaskListScreen` with the real providers behind it — the real Query cache, the
 real Zustand stores, the real components — and MSW the only thing standing in.
 It asserts the rows the API returned, that marking an `IN_PROGRESS` Task Done
