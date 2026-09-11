@@ -12,12 +12,16 @@
     "start": "npm run start -w @insightt/web",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:e2e": "start-server-and-test dev http://localhost:3000 \"cypress run\"",
+    "test:e2e:open": "start-server-and-test dev http://localhost:3000 \"cypress open --e2e\"",
     "db:generate": "npm run db:generate -w @insightt/api",
     "db:migrate": "npm run db:migrate -w @insightt/api",
     "db:seed": "npm run db:seed -w @insightt/api",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p cypress/tsconfig.json"
   },
   "devDependencies": {
-    "concurrently": "^9.2.4"
+    "concurrently": "^9.2.4",
+    "cypress": "^16.0.0",
+    "start-server-and-test": "^3.0.12"
   }
 }

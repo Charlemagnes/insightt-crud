@@ -47,6 +47,7 @@ carries a pre-committed cut list for when it runs short.
 apps/web              Next.js 16 SPA
 apps/api              Express + TypeScript REST API
 packages/shared       Zod schemas, inferred types, status-transition rules
+cypress/              The E2E spec and the Auth0 sign-in it needs
 docs/adr/             Architecture decision records
 scripts/              setup-auth0.sh
 CONTEXT.md            Domain glossary
@@ -88,6 +89,9 @@ apps/web/src/     app/{layout,page}.tsx
 packages/shared/  src/index.ts
                   src/schemas/task.ts
                   src/rules/transitions.ts
+
+cypress/          e2e/task-list.cy.ts
+                  support/{e2e,commands,auth0}.ts
 ```
 
 Components are grouped by the screen they belong to, with `shared/` for the
@@ -788,7 +792,7 @@ button: no assertion here concerns it, and a fake `Auth0Provider` would be
 faking something the Task list itself never touches. Signing in for real is
 test 3's job.
 
-**3. E2E — Cypress**
+**3. E2E — Cypress** (`cypress/e2e/task-list.cy.ts`, one spec)
 The login flow, using the Regular Web Application from §10 with
 `grant_type: http://auth0.com/oauth/grant-type/password-realm` and an explicit
 `realm`, which sidesteps the tenant's Default Directory setting entirely. The
@@ -796,7 +800,25 @@ token is written straight into the
 `@@auth0spajs@@::<clientId>::<audience>::<scope>` localStorage key, so the app
 boots already authenticated with no cross-origin redirect. The spec stays
 **read-only** — log in, assert the list renders — so there is no teardown.
-`cy.origin()` is the fallback if the Password grant cannot be enabled.
+`cy.origin()` is the fallback if the Password grant cannot be enabled, and
+`cypress/support/auth0.ts` documents what it would look like.
+
+`<clientId>` there is the **SPA** client, not the one that minted the token:
+Cypress mints with the Regular Web App because that is the client allowed the
+grant, then stores the result under the key the browser app will look under.
+The `azp` claim differs between the two, and nothing checks it — the API
+validates signature, issuer and audience, all of which hold.
+
+Two details the key alone does not cover, both in `seedSession`. `getUser()`
+builds its lookup from the SDK's per-audience scope map, which has no entry for
+this audience while the app names no scope of its own — so it arrives with no
+scope to match on and never reaches the entry above, and the ID token has to be
+written under `::@@user@@` as well. And `checkSession()` returns early unless
+the `auth0.<clientId>.is.authenticated` cookie is set, which is why the seed
+sets that too.
+
+`npm run test:e2e` is one command for the whole thing: `start-server-and-test`
+boots `npm run dev`, waits for :3000, runs the spec and stops both servers.
 
 Config: `next/jest` in `apps/web` (`jest-fixed-jsdom`, with `jest.setup.ts`
 supplying the `NEXT_PUBLIC_*` values `config.ts` reads at import time, so the
@@ -846,7 +868,7 @@ Environment:
 |---|---|
 | `apps/api/.env` | `DATABASE_URL` (Supavisor session-mode string), `DATABASE_CA_CERT` (optional), `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `PORT`, `WEB_ORIGIN` |
 | `apps/web/.env.local` | `NEXT_PUBLIC_AUTH0_DOMAIN`, `NEXT_PUBLIC_AUTH0_CLIENT_ID`, `NEXT_PUBLIC_AUTH0_AUDIENCE`, `NEXT_PUBLIC_API_URL` |
-| `cypress.env.json` | `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_REALM`, `CYPRESS_CLIENT_ID`, `CYPRESS_CLIENT_SECRET`, `AUTH0_TEST_EMAIL`, `AUTH0_TEST_PASSWORD` |
+| `cypress.env.json` | `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_REALM`, `AUTH0_SPA_CLIENT_ID`, `AUTH0_CYPRESS_CLIENT_ID`, `AUTH0_CYPRESS_CLIENT_SECRET`, `AUTH0_TEST_EMAIL`, `AUTH0_TEST_PASSWORD` |
 
 All three are gitignored. `.env.example` files ship with the repo and the README
 documents the setup path; the deployment target is local, so whoever reviews

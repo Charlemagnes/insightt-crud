@@ -358,13 +358,17 @@ NEXT_PUBLIC_API_URL=http://localhost:4000
 WEBENV
 printf '  %s✓ wrote%s apps/web/.env.local\n' "$GREEN" "$RESET"
 
+# Both client ids, and each is named for its client: Cypress mints the token
+# with the Regular Web App, then stores it under the SPA client's cache key,
+# which is the only key the browser app looks under.
 cat > cypress.env.json <<CYENV
 {
   "AUTH0_DOMAIN": "$AUTH0_DOMAIN",
   "AUTH0_AUDIENCE": "$AUTH0_AUDIENCE",
   "AUTH0_REALM": "$AUTH0_REALM",
-  "AUTH0_CLIENT_ID": "$AUTH0_CYPRESS_CLIENT_ID",
-  "AUTH0_CLIENT_SECRET": "$AUTH0_CYPRESS_CLIENT_SECRET",
+  "AUTH0_SPA_CLIENT_ID": "$AUTH0_SPA_CLIENT_ID",
+  "AUTH0_CYPRESS_CLIENT_ID": "$AUTH0_CYPRESS_CLIENT_ID",
+  "AUTH0_CYPRESS_CLIENT_SECRET": "$AUTH0_CYPRESS_CLIENT_SECRET",
   "AUTH0_TEST_EMAIL": "$AUTH0_TEST_EMAIL",
   "AUTH0_TEST_PASSWORD": "$AUTH0_TEST_PASSWORD"
 }
