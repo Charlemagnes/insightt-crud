@@ -16,11 +16,14 @@
     "db:generate": "npm run db:generate -w @insightt/api",
     "db:migrate": "npm run db:migrate -w @insightt/api",
     "db:seed": "npm run db:seed -w @insightt/api",
-    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p cypress/tsconfig.json"
+    "docs:api": "npm run docs:api -w @insightt/api",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p cypress/tsconfig.json",
+    "prepare": "husky"
   },
   "devDependencies": {
     "concurrently": "^9.2.4",
     "cypress": "^16.0.0",
+    "husky": "^9.1.7",
     "start-server-and-test": "^3.0.12",
     "typescript": "^5"
   }

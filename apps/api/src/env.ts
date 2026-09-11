@@ -36,6 +36,12 @@ const EnvSchema = z.object({
   WEB_ORIGIN: z
     .url({ protocol: /^https?$/, error: "WEB_ORIGIN must be an http(s) URL" })
     .default("http://localhost:3000"),
+  // An enum rather than a free string so an unrecognised value fails loudly.
+  // Read the other way round — anything that is not `production` is
+  // development — a typo would silently turn off the one thing that reads it.
+  NODE_ENV: z
+    .enum(["development", "test", "production"])
+    .default("development"),
 });
 
 export interface Env {
@@ -50,6 +56,11 @@ export interface Env {
   port: number;
   /** The single browser origin CORS admits. */
   webOrigin: string;
+  /**
+   * Whether to serve the generated API description at `/api/docs`. True
+   * everywhere but production; `docs/router.ts` explains why that is the split.
+   */
+  serveDocs: boolean;
 }
 
 /**
@@ -73,6 +84,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     AUTH0_AUDIENCE,
     PORT,
     WEB_ORIGIN,
+    NODE_ENV,
   } = parsed.data;
 
   return {
@@ -82,5 +94,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     auth0Audience: AUTH0_AUDIENCE,
     port: PORT,
     webOrigin: WEB_ORIGIN,
+    serveDocs: NODE_ENV !== "production",
   };
 }

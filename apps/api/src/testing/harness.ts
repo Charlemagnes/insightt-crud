@@ -47,6 +47,8 @@ export interface HarnessOptions {
   tasks?: OwnedTask[];
   /** Replaces the in-memory repository outright, for the failure paths. */
   taskRepository?: Partial<TaskRepository>;
+  /** Mounts `/api/docs`, which the composition root does outside production. */
+  serveDocs?: boolean;
 }
 
 /**
@@ -70,6 +72,7 @@ export function harness(options: HarnessOptions = {}): Harness {
     taskRepository,
     requireAuth: options.requireAuth ?? authenticateAs(TEST_USER_ID),
     webOrigin: WEB_ORIGIN,
+    serveDocs: options.serveDocs,
     log: (record) => records.push(record),
   });
 

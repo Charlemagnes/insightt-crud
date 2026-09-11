@@ -19,6 +19,7 @@ const app = createApp({
   taskRepository: createDrizzleTaskRepository(db),
   requireAuth: createAuthMiddleware(env),
   webOrigin: env.webOrigin,
+  serveDocs: env.serveDocs,
 });
 
 app.listen(env.port, () => {

@@ -1,6 +1,7 @@
 import cors from "cors";
 import express, { type Express, type RequestHandler, Router } from "express";
 
+import { createDocsRoutes } from "@/docs/router";
 import { attachActor } from "@/middleware/auth";
 import { createErrorHandler, notFoundHandler } from "@/middleware/errors";
 import {
@@ -23,6 +24,8 @@ export interface AppDependencies {
   requireAuth: RequestHandler;
   /** The single browser origin CORS admits. */
   webOrigin: string;
+  /** Mounts the generated API description at `/api/docs`. See `docs/router.ts`. */
+  serveDocs?: boolean;
   log?: LogSink;
 }
 
@@ -33,6 +36,7 @@ export function createApp({
   taskRepository,
   requireAuth,
   webOrigin,
+  serveDocs = false,
   log = consoleLogSink,
 }: AppDependencies): Express {
   const app = express();
@@ -56,6 +60,12 @@ export function createApp({
     }),
   );
   app.use(express.json({ limit: MAX_BODY_SIZE }));
+
+  // Ahead of the `/api` router, which puts everything under it behind a token —
+  // which is exactly what the docs cannot sit behind. See `docs/router.ts`.
+  if (serveDocs) {
+    app.use("/api/docs", createDocsRoutes());
+  }
 
   const api = Router();
   api.use(requireAuth, attachActor);

@@ -186,6 +186,39 @@ describe("createApp", () => {
     });
   });
 
+  /** The generated API description (PLAN.md §16, `docs/router.ts`). */
+  describe("API description", () => {
+    it("serves the document, and the UI that reads it, when asked", async () => {
+      const { app } = harness({ serveDocs: true });
+
+      const document = await request(app).get("/api/docs/openapi.json");
+      expect(document.status).toBe(200);
+      expect(document.body.openapi).toBe("3.1.0");
+      expect(document.body.paths).toHaveProperty("/api/tasks");
+
+      const ui = await request(app).get("/api/docs/");
+      expect(ui.status).toBe(200);
+      expect(ui.text).toContain("swagger-ui");
+    });
+
+    it("is absent by default, which is what production gets", async () => {
+      const { app } = harness();
+
+      const response = await request(app).get("/api/docs/openapi.json");
+
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe("NOT_FOUND");
+    });
+
+    it("needs no token, so the UI can load without one", async () => {
+      const { app } = harness({ requireAuth: rejectEveryone, serveDocs: true });
+
+      const response = await request(app).get("/api/docs/openapi.json");
+
+      expect(response.status).toBe(200);
+    });
+  });
+
   describe("CORS", () => {
     it("allows the web app origin and the precondition request header", async () => {
       const { app } = harness();
