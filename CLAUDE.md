@@ -104,8 +104,11 @@ v16 APIs differ from older releases.
   builds it from the shared Zod schemas with `z.toJSONSchema()`, so no field,
   cap or enum member is ever restated. Only what Zod cannot know — the routes,
   their headers, the error codes each answers with — is written by hand there,
-  and `openapi.test.ts` holds that half against the real Express router. Served
-  at `/api/docs` outside production only — `docs/router.ts` says why.
+  and `openapi.test.ts` holds that half against the real Express router, and
+  the document against the checked-in `docs/openapi.json`. A Husky pre-commit
+  hook regenerates the file and refuses the commit if that changed anything, so
+  run `npm run docs:api` after touching a schema or a route. Served at
+  `/api/docs` outside production only — `docs/router.ts` says why.
 - **Triggers and functions are hand-written migrations.** `drizzle-kit` diffs
   tables only, so `npm run db:generate -- --custom --name <what>` and write the
   SQL. Never edit a generated migration to carry one.

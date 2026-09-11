@@ -140,6 +140,12 @@ against the real Express router: adding a route without documenting it fails a
 test. So does leaving the checked-in file stale, which is the one way a
 generated document can still be wrong.
 
+A Husky pre-commit hook (`.husky/pre-commit`) catches that second one earlier,
+at the moment it would enter history: it regenerates the file and refuses the
+commit if that changed anything. It refuses rather than staging the file
+itself, so a commit stays what you staged. `npm install` installs the hook;
+`git commit --no-verify` skips it.
+
 With the API running, the same document is served at
 <http://localhost:4000/api/docs/openapi.json>, with Swagger UI over it at
 <http://localhost:4000/api/docs>. **Not in production** — `NODE_ENV` is the

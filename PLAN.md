@@ -952,6 +952,12 @@ local, so whoever reviews this runs it themselves.
   compares the document against the checked-in JSON. Adding a route without
   documenting it fails a test, and so does forgetting to regenerate.
 
+  A Husky pre-commit hook catches the stale file at the moment it would enter
+  history rather than at the next test run: it regenerates and refuses the
+  commit if that changed anything. It is the repo's only hook — there is no
+  lint-staged and no Prettier, since antd and the existing style were not
+  written to one.
+
 ---
 
 ## 17. Requirements traceability
