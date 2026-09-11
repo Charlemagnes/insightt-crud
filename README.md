@@ -40,19 +40,20 @@ reviewer can register and click around.
 
 `scripts/setup-auth0.sh` is an interactive wizard, not a script that runs
 unattended. It walks the parts of the Auth0 dashboard only a human can click,
-asks for each value it cannot read, writes all three env files, and then
+asks for each value it cannot read, writes every env file below, and then
 verifies the result by minting a real token against the tenant. It covers the
 Supabase connection string too, despite the name.
 
 To see a populated list without creating Tasks by hand:
 
 ```bash
-npm run db:seed -- 'auth0|68c0…'          # the sub of whoever you signed in as
+npm run db:seed -- 'auth0|68c0…'          # the User ID to own them
 npm run db:seed -- 'auth0|68c0…' replace  # clear that Owner's Tasks first
 ```
 
-The API writes that `sub` on the `actor` log line the first time you load the
-app, so it is one `npm run dev` pane away.
+The User ID is whatever Auth0 assigned you. The API writes it on the `actor`
+log line the first time you load the app, so it is one `npm run dev` pane
+away.
 
 ### Environment
 
@@ -111,7 +112,7 @@ JSON REST, every route behind a valid Auth0 access token.
 | `POST` | `/api/tasks/:id/archive` | `DONE → ARCHIVED` | `200` + `Task` |
 | `DELETE` | `/api/tasks/:id` | Delete, legal from any Status | `204` |
 
-Status changes are dedicated endpoints rather than `PATCH { status }`, and
+Transitions are dedicated endpoints rather than `PATCH { status }`, and
 `status` is absent from every input schema. That is what keeps the Postgres
 function `mark_task_done()` the single entrance to `DONE` — see
 [Concurrency](#concurrency-and-idempotency) below.
@@ -134,16 +135,18 @@ it cannot drift from what the API actually accepts. Regenerate it with
 
 What Zod cannot know — which routes exist, which headers they require, which
 error codes each can answer with — is written by hand in
-`apps/api/src/docs/openapi.ts`, and a test holds *that* half against the real
-Express router: adding a route without documenting it fails
-`docs/openapi.test.ts`.
+`apps/api/src/docs/openapi.ts`, and `docs/openapi.test.ts` holds *that* half
+against the real Express router: adding a route without documenting it fails a
+test. So does leaving the checked-in file stale, which is the one way a
+generated document can still be wrong.
 
 With the API running, the same document is served at
 <http://localhost:4000/api/docs/openapi.json>, with Swagger UI over it at
-<http://localhost:4000/api/docs>. **Development only.** It has to sit outside
-the auth stack — a browser loading a page has no Authorization header to put on
-the request — so serving it in production would hand an unauthenticated caller
-the shape of every route. `NODE_ENV=production` turns it off.
+<http://localhost:4000/api/docs>. **Not in production** — `NODE_ENV` is the
+switch, and anything but `production` mounts it. It has to sit outside the auth
+stack, since a browser loading a page carries no Authorization header, so
+serving it in production would hand an unauthenticated caller the shape of
+every route.
 
 ---
 
@@ -259,7 +262,7 @@ npm run test      # Jest, per workspace
 npm run test:e2e  # Cypress against the real Auth0 tenant
 ```
 
-374 Jest tests across three workspaces, plus one Cypress spec.
+375 Jest tests across three workspaces, plus one Cypress spec.
 
 ### "A backend unit test written with React Testing Library"
 
@@ -283,15 +286,15 @@ separately some RTL", that is what is here.
 
 ### 1. Backend and shared — Jest, no RTL
 
-`packages/shared` (70 tests) and `apps/api` (272), plus the non-rendering parts
+`packages/shared` (70 tests) and `apps/api` (273), plus the non-rendering parts
 of `apps/web`. Two kinds, and the split is worth stating rather than filing
 both under "unit".
 
 *Genuinely unit* — called directly, with no HTTP in front of them. The
 transition validator and the schemas in `packages/shared`; and in `apps/api`,
-`repository.drizzle.ts` under a stubbed `pg` pool, which at 51 cases asserting
-the SQL and the parameters it emits is the largest single block of tests in the
-repo, plus `mappers.ts`, `env.ts` and the generated API description.
+`repository.drizzle.ts` under a stubbed `pg` pool, 51 cases asserting the SQL
+and the parameters it emits, plus `mappers.ts`, `env.ts` and the generated API
+description.
 
 Three drift checks sit in the same tier, each holding apart two spellings of one
 rule that cannot be derived from each other: the Zod Status enum against the

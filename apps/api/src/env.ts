@@ -36,9 +36,9 @@ const EnvSchema = z.object({
   WEB_ORIGIN: z
     .url({ protocol: /^https?$/, error: "WEB_ORIGIN must be an http(s) URL" })
     .default("http://localhost:3000"),
-  // Unset means development: the value is what a deployment sets, and nothing
-  // local does. An unrecognised value would otherwise read as production and
-  // silently turn off the one thing below that reads it.
+  // An enum rather than a free string so an unrecognised value fails loudly.
+  // Read the other way round — anything that is not `production` is
+  // development — a typo would silently turn off the one thing that reads it.
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
@@ -58,8 +58,7 @@ export interface Env {
   webOrigin: string;
   /**
    * Whether to serve the generated API description at `/api/docs`. True
-   * everywhere but production, where an unauthenticated page describing every
-   * route is not something to hand out — see `docs/router.ts`.
+   * everywhere but production; `docs/router.ts` explains why that is the split.
    */
   serveDocs: boolean;
 }

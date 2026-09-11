@@ -1,10 +1,14 @@
+import { readFileSync } from "node:fs";
+
 import { ErrorCode, TaskStatus, TASK_PAGE } from "@insightt/shared";
 
+import { OPENAPI_JSON_PATH } from "@/docs/generate";
 import {
   buildOpenApiDocument,
   type Operation,
   type OpenApiDocument,
   type Parameter,
+  type ResponseObject,
 } from "@/docs/openapi";
 import { createFakeTaskRepository } from "@/tasks/repository.fake";
 import { createTaskRoutes } from "@/tasks/routes";
@@ -30,6 +34,21 @@ describe("buildOpenApiDocument", () => {
     // broken reading of the router stack would give it.
     expect(mounted.length).toBe(8);
     expect(documentedOperations(document)).toEqual(mounted);
+  });
+
+  /**
+   * Generating the document settles the schemas; it does not settle the file.
+   * A change to a schema or a route reaches `docs/openapi.json` only when
+   * someone runs `npm run docs:api`, and a stale file is the one way the
+   * generated description can still be wrong — every other test here would
+   * stay green through it. So this is the test that fails instead.
+   */
+  it("matches the checked-in docs/openapi.json — run `npm run docs:api`", () => {
+    const committed: unknown = JSON.parse(
+      readFileSync(OPENAPI_JSON_PATH, "utf8"),
+    );
+
+    expect(committed).toEqual(document);
   });
 
   it("names the bearer token every route sits behind", () => {
@@ -126,22 +145,20 @@ describe("buildOpenApiDocument", () => {
   });
 
   describe("the transition operations", () => {
+    const TRANSITION_PATHS = [
+      "/api/tasks/{id}/start",
+      "/api/tasks/{id}/done",
+      "/api/tasks/{id}/archive",
+    ];
+
     it("takes no request body, because the target Status is in the path", () => {
-      for (const path of [
-        "/api/tasks/{id}/start",
-        "/api/tasks/{id}/done",
-        "/api/tasks/{id}/archive",
-      ]) {
+      for (const path of TRANSITION_PATHS) {
         expect(document.paths[path].post).not.toHaveProperty("requestBody");
       }
     });
 
     it("names 409 on each, for a move that is not legal from here", () => {
-      for (const path of [
-        "/api/tasks/{id}/start",
-        "/api/tasks/{id}/done",
-        "/api/tasks/{id}/archive",
-      ]) {
+      for (const path of TRANSITION_PATHS) {
         expect(document.paths[path].post.responses).toHaveProperty("409");
       }
     });
@@ -164,7 +181,7 @@ describe("buildOpenApiDocument", () => {
 });
 
 /** The JSON body a response declares. */
-function jsonSchemaOf(response: { content?: Record<string, { schema: unknown }> }) {
+function jsonSchemaOf(response: ResponseObject) {
   return response.content?.["application/json"].schema;
 }
 
@@ -183,6 +200,12 @@ function documentedOperations(document: OpenApiDocument): string[] {
  * Every `METHOD /path` the Express router actually serves, spelled the way
  * OpenAPI spells a path parameter and prefixed with the mount point `app.ts`
  * gives the router.
+ *
+ * This reads Express 5's own layer stack, which is internal to it and not part
+ * of any promise it makes. That coupling is the price of the drift check being
+ * real rather than a second hand-written list, and it is named here because an
+ * Express major is what breaks it — the count assertion above is what turns
+ * that break into a failure instead of a test that quietly stops checking.
  */
 function mountedOperations(): string[] {
   const router = createTaskRoutes(createFakeTaskRepository());

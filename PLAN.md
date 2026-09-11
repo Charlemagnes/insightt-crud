@@ -769,12 +769,11 @@ non-rendering parts of `apps/web`)
 Two kinds of test, and the split is worth stating plainly rather than filing
 both under "unit".
 
-*Genuinely unit* — 88 of `apps/api`'s 272, called directly with no HTTP in
+*Genuinely unit* — 89 of `apps/api`'s 273, called directly with no HTTP in
 front of them, alongside all 70 in `packages/shared`: the transition validator
 and the schemas there; and in `apps/api`, `repository.drizzle.ts` under a
-stubbed `pg` pool, which at 51 cases asserting the SQL and the parameters it
-emits is the largest single block of tests in the repo, plus `tasks/mappers.ts`,
-`env.ts` and `docs/openapi.ts`.
+stubbed `pg` pool — 51 cases asserting the SQL and the parameters it emits —
+plus `tasks/mappers.ts`, `env.ts` and `docs/openapi.ts`.
 
 Three drift checks sit in the same tier, each holding apart two spellings of one
 rule that cannot be derived from each other: the Zod enum against the Postgres
@@ -947,9 +946,11 @@ local, so whoever reviews this runs it themselves.
   (a browser loading a page carries no Authorization header), and `NODE_ENV`
   is what turns it off.
 
-  Generating it settles the schemas but not the routes, so `docs/openapi.test.ts`
-  reads the operations off the real Express router and asserts the document
-  describes exactly those. Adding a route without documenting it fails a test.
+  Generating it settles the schemas but neither the routes nor the file, so
+  `docs/openapi.test.ts` closes both: it reads the operations off the real
+  Express router and asserts the document describes exactly those, and it
+  compares the document against the checked-in JSON. Adding a route without
+  documenting it fails a test, and so does forgetting to regenerate.
 
 ---
 

@@ -524,7 +524,7 @@
     "/api/tasks/{id}/done": {
       "post": {
         "summary": "Mark a Task as Done",
-        "description": "Idempotent, and the only entrance to DONE: one call to the `mark_task_done()` function in Postgres, which decides and writes in the same statement. A second call on an already-DONE Task is a success that changes nothing — same version, same `completedAt` — and says so with `X-Idempotent-Replay`. Legal only from `IN_PROGRESS`.",
+        "description": "Idempotent, and the only entrance to DONE: one call to the `mark_task_done()` function in Postgres, which decides and writes in the same statement. A second call on an already-DONE Task is a success that changes nothing — same version, same `completedAt` — and says so with `X-Idempotent-Replay`. Legal only from `IN_PROGRESS`. No request body: the target Status is in the path, so there is nothing a client can contradict.",
         "operationId": "markTaskDone",
         "parameters": [
           {

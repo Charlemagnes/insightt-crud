@@ -105,30 +105,40 @@ function componentsFrom(
   });
 
   return Object.fromEntries(
-    Object.entries(schemas).map(([id, schema]) => [id, asComponent(schema)]),
+    Object.entries(schemas).map(([id, schema]) => [
+      id,
+      withoutSchemaKeywords(schema),
+    ]),
   );
 }
 
 /**
  * Drops the two keywords a standalone JSON Schema document carries and a
- * component inside an OpenAPI document should not: `$schema`, which the
- * document declares once for all of them, and the `$id` the `uri` option
- * writes — that string is the *reference* to this component, and repeating it
- * as the component's own identifier makes a resolver point every `$ref` at
- * whatever document it happens to be reading.
+ * fragment inside an OpenAPI document should not: `$schema`, which the document
+ * declares once for all of them, and the `$id` the `uri` option writes — that
+ * string is the *reference* to the schema, and repeating it as the schema's own
+ * identifier makes a resolver point every `$ref` at whatever document it
+ * happens to be reading.
  */
-function asComponent(schema: unknown): JsonSchema {
+function withoutSchemaKeywords(schema: unknown): JsonSchema {
   const { $schema: _schema, $id: _id, ...rest } = schema as JsonSchema;
   return rest;
 }
 
-/** One property of a schema, for a parameter that should mirror it exactly. */
-function propertyOf(schema: z.ZodType, property: string): JsonSchema {
-  const generated = asComponent(
+/**
+ * One schema on its own, in the shape a client may *send*. Everything below
+ * that reads a parameter off a schema goes through here, so `target` and `io`
+ * are settled in one place rather than agreed on by three callers.
+ */
+function inputSchemaOf(schema: z.ZodType): JsonSchema {
+  return withoutSchemaKeywords(
     z.toJSONSchema(schema, { target: "draft-2020-12", io: "input" }),
   );
+}
 
-  const value = generated.properties?.[property];
+/** One property of a schema, for a parameter that should mirror it exactly. */
+function propertyOf(schema: z.ZodType, property: string): JsonSchema {
+  const value = inputSchemaOf(schema).properties?.[property];
 
   if (!value) {
     throw new Error(`${property} is not a property of the schema`);
@@ -139,9 +149,7 @@ function propertyOf(schema: z.ZodType, property: string): JsonSchema {
 
 /** The list's query string as parameters, straight off `TaskListQuery`. */
 function listQueryParameters(): Parameter[] {
-  const generated = asComponent(
-    z.toJSONSchema(TaskListQuery, { target: "draft-2020-12", io: "input" }),
-  );
+  const generated = inputSchemaOf(TaskListQuery);
   const required = new Set(generated.required ?? []);
 
   return Object.entries(generated.properties ?? {}).map(([name, schema]) => ({
@@ -221,26 +229,31 @@ const invalidId = failure("VALIDATION_FAILED", "`id` is not a UUID.");
 /**
  * One of the three Transition endpoints. They differ only in which move they
  * make, so they are written once: the same absent body, the same failures, and
- * the same reason a refusal is `409` and not `422`.
+ * the same reason a refusal is `409` and not `422`. What is particular to an
+ * endpoint goes in `note`, and Mark Done — the only one whose success carries a
+ * second header — passes its own `success`.
  */
 function transition(operation: {
   summary: string;
-  description?: string;
+  note?: string;
   operationId: string;
   from: string;
   to: string;
+  success?: ResponseObject;
 }): Record<string, Operation> {
   return {
     post: {
       summary: operation.summary,
       description:
-        (operation.description ? `${operation.description} ` : "") +
+        (operation.note ? `${operation.note} ` : "") +
         `Legal only from \`${operation.from}\`. No request body: the target ` +
         "Status is in the path, so there is nothing a client can contradict.",
       operationId: operation.operationId,
       parameters: [idParameter],
       responses: {
-        "200": taskResponse(`The Task, now \`${operation.to}\`.`),
+        "200":
+          operation.success ??
+          taskResponse(`The Task, now \`${operation.to}\`.`),
         ...transitionFailures(operation.to),
       },
     },
@@ -375,42 +388,34 @@ export function buildOpenApiDocument(): OpenApiDocument {
         from: "PENDING",
         to: "IN_PROGRESS",
       }),
-      "/api/tasks/{id}/done": {
-        post: {
-          ...transition({
-            summary: "Mark a Task as Done",
-            operationId: "markTaskDone",
-            from: "IN_PROGRESS",
-            to: "DONE",
-          }).post,
-          description:
-            "Idempotent, and the only entrance to DONE: one call to the " +
-            "`mark_task_done()` function in Postgres, which decides and " +
-            "writes in the same statement. A second call on an already-DONE " +
-            "Task is a success that changes nothing — same version, same " +
-            "`completedAt` — and says so with `X-Idempotent-Replay`. Legal " +
-            "only from `IN_PROGRESS`.",
-          responses: {
-            "200": {
-              description: "The Task, now `DONE`.",
-              headers: {
-                ...etagHeader,
-                "X-Idempotent-Replay": {
-                  description:
-                    "`true` when the Task was already DONE and this call " +
-                    "changed nothing.",
-                  schema: { type: "string", enum: ["true"] } as JsonSchema,
-                },
-              },
-              content: jsonOf("Task"),
+      "/api/tasks/{id}/done": transition({
+        summary: "Mark a Task as Done",
+        note:
+          "Idempotent, and the only entrance to DONE: one call to the " +
+          "`mark_task_done()` function in Postgres, which decides and writes " +
+          "in the same statement. A second call on an already-DONE Task is a " +
+          "success that changes nothing — same version, same `completedAt` — " +
+          "and says so with `X-Idempotent-Replay`.",
+        operationId: "markTaskDone",
+        from: "IN_PROGRESS",
+        to: "DONE",
+        success: {
+          description: "The Task, now `DONE`.",
+          headers: {
+            ...etagHeader,
+            "X-Idempotent-Replay": {
+              description:
+                "`true` when the Task was already DONE and this call changed " +
+                "nothing.",
+              schema: { type: "string", enum: ["true"] } as JsonSchema,
             },
-            ...transitionFailures("DONE"),
           },
+          content: jsonOf("Task"),
         },
-      },
+      }),
       "/api/tasks/{id}/archive": transition({
         summary: "Archive a Task",
-        description:
+        note:
           "200 with the Task, not 204: Archiving is a Transition, not a " +
           "delete, and the Task goes on appearing in the list.",
         operationId: "archiveTask",

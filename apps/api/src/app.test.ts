@@ -186,11 +186,7 @@ describe("createApp", () => {
     });
   });
 
-  /**
-   * The generated API description (PLAN.md §16). It sits outside the auth
-   * stack — Swagger UI cannot carry a bearer token to fetch the page it is
-   * about — which is exactly why it is not mounted in production.
-   */
+  /** The generated API description (PLAN.md §16, `docs/router.ts`). */
   describe("API description", () => {
     it("serves the document, and the UI that reads it, when asked", async () => {
       const { app } = harness({ serveDocs: true });

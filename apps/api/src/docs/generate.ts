@@ -4,14 +4,31 @@ import { dirname, resolve } from "node:path";
 import { buildOpenApiDocument } from "@/docs/openapi";
 
 /**
- * Writes `docs/openapi.json` at the repo root. Run it with `npm run docs:api`
- * after changing a schema or a route; the running API serves the same document
- * at `/api/docs/openapi.json`, so the checked-in file is a convenience for
+ * The checked-in copy of the document, at the repo root. The running API serves
+ * the same thing at `/api/docs/openapi.json`; this file is the convenience for
  * anyone reading the repo without starting it, not a second source of truth.
  */
-const OUTPUT = resolve(__dirname, "../../../../docs/openapi.json");
+export const OPENAPI_JSON_PATH = resolve(
+  __dirname,
+  "../../../../docs/openapi.json",
+);
 
-mkdirSync(dirname(OUTPUT), { recursive: true });
-writeFileSync(OUTPUT, `${JSON.stringify(buildOpenApiDocument(), null, 2)}\n`);
+/**
+ * Writes it. `npm run docs:api` after changing a schema or a route — and
+ * `openapi.test.ts` fails if you forget, since a stale file is the one way the
+ * generated document can still be wrong.
+ */
+export function writeOpenApiDocument(): void {
+  mkdirSync(dirname(OPENAPI_JSON_PATH), { recursive: true });
+  writeFileSync(
+    OPENAPI_JSON_PATH,
+    `${JSON.stringify(buildOpenApiDocument(), null, 2)}\n`,
+  );
+}
 
-console.log(`wrote ${OUTPUT}`);
+// Only when run as the script, so the test can import the path without the
+// import writing a file as a side effect.
+if (require.main === module) {
+  writeOpenApiDocument();
+  console.log(`wrote ${OPENAPI_JSON_PATH}`);
+}

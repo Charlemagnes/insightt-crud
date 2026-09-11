@@ -89,7 +89,7 @@ v16 APIs differ from older releases.
   always means a Task's id. The DB column is `owner_id`.
 - **The status machine is strictly linear**: `PENDING → IN_PROGRESS → DONE → ARCHIVED`.
   No skipping, no reverts, `ARCHIVED` is terminal.
-- **`status` is not writable through any input schema.** Status changes go through
+- **`status` is not writable through any input schema.** Transitions go through
   the dedicated endpoints (`/start`, `/done`, `/archive`) only, so that
   `mark_task_done()` stays the single atomic entrance to `DONE`. Adding `status` to
   `CreateTaskInput` or `UpdateTaskInput` breaks the idempotency guarantee.
@@ -104,9 +104,8 @@ v16 APIs differ from older releases.
   builds it from the shared Zod schemas with `z.toJSONSchema()`, so no field,
   cap or enum member is ever restated. Only what Zod cannot know — the routes,
   their headers, the error codes each answers with — is written by hand there,
-  and `openapi.test.ts` holds that half against the real Express router. It is
-  served at `/api/docs` outside production only; it cannot sit behind the auth
-  stack, which is the whole reason it is not always on.
+  and `openapi.test.ts` holds that half against the real Express router. Served
+  at `/api/docs` outside production only — `docs/router.ts` says why.
 - **Triggers and functions are hand-written migrations.** `drizzle-kit` diffs
   tables only, so `npm run db:generate -- --custom --name <what>` and write the
   SQL. Never edit a generated migration to carry one.
