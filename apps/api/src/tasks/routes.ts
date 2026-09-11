@@ -12,7 +12,7 @@ import { Router } from "express";
 import { actorOf } from "@/middleware/auth";
 import { ApiError } from "@/middleware/errors";
 import { validate } from "@/middleware/validate";
-import type { TaskRepository } from "@/tasks/repository";
+import type { Refused, TaskRepository } from "@/tasks/repository";
 
 const listValidator = validate({ query: TaskListQuery });
 const taskIdValidator = validate({ params: TaskIdParam });
@@ -103,9 +103,8 @@ export function createTaskRoutes(repository: TaskRepository): Router {
     }
 
     // A Replay is a success — the Task is Done, which is what was asked for.
-    // The header says the work was already finished, for a caller that cares
-    // to tell its own retry from the request that did it; CORS exposes it so
-    // the browser can read it (PLAN.md §10).
+    // The header is how a client tells a Replay from the request that did the
+    // work; CORS exposes it so the browser can read it (PLAN.md §10).
     if (result.outcome === "replayed") {
       res.setHeader("X-Idempotent-Replay", "true");
     }
@@ -124,10 +123,7 @@ export function createTaskRoutes(repository: TaskRepository): Router {
  * is not somewhere the move is legal. Neither reveals anything about a Task
  * someone else owns — `404` is also the answer for one that exists.
  */
-function refusalOf(
-  result: { outcome: "not_found" } | { outcome: "wrong_status"; task: Task },
-  to: TaskStatus,
-): ApiError {
+function refusalOf(result: Refused, to: TaskStatus): ApiError {
   if (result.outcome === "not_found") {
     return new ApiError(404, "NOT_FOUND", "Task not found");
   }

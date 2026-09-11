@@ -26,9 +26,10 @@ Express endpoint over a Postgres function.
 
 The deciding factor is *where the race has to be resolved*. Marking Done must be
 atomic and idempotent: two simultaneous requests must produce one completion and
-two identical `200`s, and the "why did zero rows change?" read must happen inside
-the same transaction as the conditional `UPDATE`, or a task that was `PENDING`
-can be misreported as a replay. That is a database problem, and it is solved in
+two identical `200`s, and the "why did zero rows change?" read belongs inside
+the same transaction as the conditional `UPDATE`, or the window in which a task
+that was `PENDING` gets reported as a replay is a whole round trip wide rather
+than a statement. That is a database problem, and it is solved in
 the database whichever option wraps it. An Edge Function would not perform the
 atomic work — it would call the same Postgres function.
 

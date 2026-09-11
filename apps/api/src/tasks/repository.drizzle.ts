@@ -155,9 +155,10 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
       // implies, so the contract is re-established here rather than asserted.
       const row = MarkTaskDoneRow.parse(result.rows[0]);
 
+
       return row.outcome === "not_found"
         ? { outcome: "not_found" }
-        : { outcome: row.outcome, task: toTask(toTaskRow(row)) };
+        : { outcome: row.outcome, task: toTask(asTaskRow(row)) };
     },
   };
 }
@@ -211,23 +212,42 @@ const TaskColumns = z.object({
 });
 
 /**
- * The function's four outcomes, as a schema. Parsing rather than casting is
- * what makes the SQL and this file one contract: rename an outcome in the
- * migration and every Mark Done fails loudly here, instead of falling through
- * to whichever branch happens to be last.
+ * The names `mark_task_done()` reports its outcomes under, written once here.
+ * The migration spells them again in SQL, and `db/mark-task-done.test.ts`
+ * reads this list to hold the two together. TypeScript holds the third
+ * spelling — `MarkDoneResult` — to it, because `markDone` below returns one
+ * and is built from the other.
+ */
+export const MarkDoneOutcome = z.enum([
+  "completed",
+  "replayed",
+  "wrong_status",
+  "not_found",
+]);
+
+/**
+ * The function's row, as a schema. Parsing rather than casting is what makes
+ * the SQL and this file one contract: rename an outcome in the migration and
+ * every Mark Done fails loudly here, instead of falling through to whichever
+ * branch happens to be last.
  *
- * Only `not_found` comes back without a Task, and the union says so, so no
- * caller has to check for a Task that the outcome already promised.
+ * Only `not_found` comes back without a Task, and the union says so, so
+ * nothing downstream has to check for a Task the outcome already promised.
  */
 const MarkTaskDoneRow = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("not_found") }),
-  z.object({ outcome: z.literal("completed"), ...TaskColumns.shape }),
-  z.object({ outcome: z.literal("replayed"), ...TaskColumns.shape }),
-  z.object({ outcome: z.literal("wrong_status"), ...TaskColumns.shape }),
+  z.object({
+    outcome: MarkDoneOutcome.exclude(["not_found"]),
+    ...TaskColumns.shape,
+  }),
 ]);
 
-/** Those columns under the names Drizzle's own rows use, so `toTask` can map them. */
-function toTaskRow(columns: z.infer<typeof TaskColumns>): TaskRow {
+/**
+ * The same columns under the names Drizzle's own rows use. This crosses no
+ * layer — both spellings are the database's — it only puts the row into the
+ * shape `mappers.ts` takes, which stays the single seam to the wire contract.
+ */
+function asTaskRow(columns: z.infer<typeof TaskColumns>): TaskRow {
   return {
     id: columns.id,
     ownerId: columns.owner_id,

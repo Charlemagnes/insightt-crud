@@ -1,4 +1,4 @@
-import { statusBefore, type Task } from "@insightt/shared";
+import { canTransition, type Task } from "@insightt/shared";
 
 import { randomUUID } from "node:crypto";
 
@@ -113,8 +113,9 @@ export function createMemoryTaskRepository(
       const task = owned(tasks, query);
 
       if (!task) return { outcome: "not_found" };
-      // The same guard the SQL carries, asked of the same shared rule.
-      if (task.status !== statusBefore("IN_PROGRESS")) {
+      // The same rule the SQL guard is built from, asked the other way round:
+      // there is a Task in hand here, so the question is whether it may move.
+      if (!canTransition(task.status, "IN_PROGRESS")) {
         return { outcome: "wrong_status", task: withoutOwner(task) };
       }
 
@@ -137,7 +138,7 @@ export function createMemoryTaskRepository(
         return { outcome: "replayed", task: withoutOwner(task) };
       }
 
-      if (task.status !== statusBefore("DONE")) {
+      if (!canTransition(task.status, "DONE")) {
         return { outcome: "wrong_status", task: withoutOwner(task) };
       }
 

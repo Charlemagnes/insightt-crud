@@ -3,7 +3,10 @@ import { canTransition, TaskStatus } from "@insightt/shared";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { MARK_DONE_OUTCOMES } from "@/tasks/repository";
+import { MarkDoneOutcome } from "@/tasks/repository.drizzle";
+
+/** The outcomes the repository will parse, which the SQL has to produce. */
+const OUTCOMES = MarkDoneOutcome.options;
 
 /**
  * The Transition rule into `DONE` is written twice on purpose (ADR-0002): once
@@ -30,6 +33,17 @@ const STATEMENTS = MIGRATION.replaceAll(/^\s*--.*$/gm, "");
 /** The function declaration, with the trailing `COMMENT ON FUNCTION` left out. */
 const BODY = STATEMENTS.split("COMMENT ON FUNCTION")[0];
 
+/**
+ * The conditional `UPDATE` alone, cut at the branch that reacts to it.
+ *
+ * Assertions about the guard have to be made against this and not the whole
+ * body: the read that explains a zero-row result matches on the same id and
+ * Owner, so a test that searched the body would stay green with the guard
+ * deleted — which is the one change that would let any Actor complete any
+ * Task.
+ */
+const GUARDED_UPDATE = BODY.split("IF FOUND THEN")[0];
+
 describe("mark_task_done()", () => {
   describe("its guard", () => {
     it("names exactly the Status the shared machine lets into DONE", () => {
@@ -45,14 +59,14 @@ describe("mark_task_done()", () => {
 
     it("matches on the id and the Owner as well", () => {
       // Without either, the statement would mark a Task Done for whoever asked.
-      expect(BODY).toContain("t.id = p_task_id");
-      expect(BODY).toContain("t.owner_id = p_actor");
+      expect(GUARDED_UPDATE).toContain("t.id = p_task_id");
+      expect(GUARDED_UPDATE).toContain("t.owner_id = p_actor");
     });
 
     it("writes the completion time on the update that changes the Status", () => {
       // Set here and nowhere else, which is what keeps a Replay from
       // overwriting the original completion.
-      expect(BODY).toMatch(/SET[\s\S]*completed_at\s*=\s*now\(\)/);
+      expect(GUARDED_UPDATE).toMatch(/SET[\s\S]*completed_at\s*=\s*now\(\)/);
       expect(BODY.match(/completed_at\s*=\s*now\(\)/g)).toHaveLength(1);
     });
   });
@@ -64,7 +78,7 @@ describe("mark_task_done()", () => {
         [...BODY.matchAll(/'([a-z_]+)'/g)].map(([, outcome]) => outcome),
       );
 
-      expect([...reported].sort()).toEqual([...MARK_DONE_OUTCOMES].sort());
+      expect([...reported].sort()).toEqual([...OUTCOMES].sort());
     });
 
     it("decides a Replay from a read inside the same transaction", () => {
@@ -89,14 +103,20 @@ describe("mark_task_done()", () => {
       const comment = STATEMENTS.split("COMMENT ON FUNCTION")[1];
 
       expect(comment).toBeDefined();
-      for (const outcome of MARK_DONE_OUTCOMES) {
+      for (const outcome of OUTCOMES) {
         expect(comment).toContain(outcome);
       }
     });
   });
 });
 
-/** The Status the conditional `UPDATE` requires a Task to already be in. */
+/**
+ * The Status the conditional `UPDATE` requires a Task to already be in.
+ *
+ * Read off the guarded statement alone. Searched across the whole body, a
+ * deleted guard would silently resolve to the `'DONE'` the Replay branch
+ * compares against, and this would report the wrong rule rather than none.
+ */
 function guardedStatus(): string | undefined {
-  return /UPDATE tasks[\s\S]*?t\.status\s*=\s*'([A-Z_]+)'/.exec(BODY)?.[1];
+  return /WHERE[\s\S]*?t\.status\s*=\s*'([A-Z_]+)'/.exec(GUARDED_UPDATE)?.[1];
 }

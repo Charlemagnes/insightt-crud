@@ -47,46 +47,32 @@ export interface TaskListResult {
 }
 
 /**
- * What a guarded Transition did, as a discriminated outcome rather than a Task
- * that may or may not have changed.
+ * Why a Transition did not happen. The distinction this preserves is the one
+ * the routes report as `409` against `404`: a repository that answered
+ * `Task | null` would have thrown it away before anything could.
  *
- * The distinction the union is here to preserve is `wrong_status` against
- * `not_found`: they are `409` and `404`, and a repository that returned
- * `Task | null` would have thrown the difference away before the route could
- * report it.
+ * `not_found` carries no Task, because a Task the Actor does not own and a
+ * Task that does not exist are the same answer and neither has one to give.
  */
-export type TransitionResult =
-  | { outcome: "changed"; task: Task }
+export type Refused =
   | { outcome: "wrong_status"; task: Task }
   | { outcome: "not_found" };
 
-/**
- * The names `mark_task_done()` reports its four outcomes under. They are
- * values and not only a type because the migration spells them in SQL as well,
- * and `db/mark-task-done.test.ts` holds the two lists together.
- */
-export const MARK_DONE_OUTCOMES = [
-  "completed",
-  "replayed",
-  "wrong_status",
-  "not_found",
-] as const;
+/** What a guarded Transition did. */
+export type TransitionResult = { outcome: "changed"; task: Task } | Refused;
 
 /**
- * What marking a Task Done did. The same three outcomes a Transition has, plus
- * the one that only Mark Done has: a Replay — the Task was already `DONE`,
- * nothing was written, and that is a success (CONTEXT.md, "Replay").
+ * What marking a Task Done did: the same refusals, and two ways to succeed.
  *
- * `replayed` is deliberately not folded into `completed`. It is the same `200`
- * with the same body, but the route marks it with a header, and collapsing the
- * two here would mean the API could no longer tell a caller whether their
- * request was the one that finished the work.
+ * `replayed` is deliberately not folded into `completed`. The Task was already
+ * `DONE`, nothing was written, and that is a success (CONTEXT.md, "Replay") —
+ * but it is the one the route marks with a header, and collapsing the two here
+ * would leave the API unable to say which request finished the work.
  */
 export type MarkDoneResult =
   | { outcome: "completed"; task: Task }
   | { outcome: "replayed"; task: Task }
-  | { outcome: "wrong_status"; task: Task }
-  | { outcome: "not_found" };
+  | Refused;
 
 /**
  * The Task repository. `apps/api` never imports a concrete implementation above

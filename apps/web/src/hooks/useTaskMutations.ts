@@ -33,7 +33,7 @@ export function useStartTask() {
   return useTaskRowMutation({
     run: startTask,
     inFlight: (task) => ({ ...task, status: "IN_PROGRESS" }),
-    settled: (task) => task,
+    taskIn: (task) => task,
   });
 }
 
@@ -48,7 +48,7 @@ export function useMarkTaskDone() {
   return useTaskRowMutation<MarkDoneResponse>({
     run: markTaskDone,
     inFlight: (task) => ({ ...task, status: "DONE" }),
-    settled: (result) => result.task,
+    taskIn: (result) => result.task,
   });
 }
 
@@ -58,7 +58,7 @@ interface TaskRowMutation<Result> {
   /** How the row should look while the request is in flight. */
   inFlight: (task: Task) => Task;
   /** The Task in the response, which the cache is corrected from. */
-  settled: (result: Result) => Task;
+  taskIn: (result: Result) => Task;
 }
 
 /**
@@ -76,7 +76,7 @@ interface TaskRowMutation<Result> {
 function useTaskRowMutation<Result>({
   run,
   inFlight,
-  settled,
+  taskIn,
 }: TaskRowMutation<Result>) {
   const queryClient = useQueryClient();
 
@@ -104,7 +104,7 @@ function useTaskRowMutation<Result>({
     },
 
     onSuccess: (result) => {
-      const task = settled(result);
+      const task = taskIn(result);
 
       queryClient.setQueryData<TaskPage>(tasksQueryKey, (page) =>
         page ? withRow(page, task.id, () => task) : page,

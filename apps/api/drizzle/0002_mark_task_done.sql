@@ -46,15 +46,21 @@ BEGIN
   IF FOUND THEN
     outcome := 'completed';
   ELSE
-    -- Zero rows changed, and the caller needs to know why. Reading the row
-    -- here rather than in the API is the whole point of the function: outside
-    -- this transaction another request could move the Task in between, and one
-    -- that was PENDING at the UPDATE -- correctly a rejection -- would read
-    -- back as DONE and be misreported as a Replay.
+    -- Zero rows changed, and the answer has to say why. Reading the row here
+    -- rather than in the API is the point of the function: the explanation is
+    -- one statement later on one connection inside one transaction, instead
+    -- of a second round trip whose window another request can walk through
+    -- and turn a rejection into a Replay.
+    --
+    -- FOR UPDATE closes the rest of it that can be closed: a completion that
+    -- is in flight right now is waited for and then seen, rather than raced
+    -- past. What remains is a Task another request completed just before this
+    -- statement, reported as a Replay -- which is true. It is DONE.
     SELECT * INTO found_task
       FROM tasks AS t
      WHERE t.id = p_task_id
-       AND t.owner_id = p_actor;
+       AND t.owner_id = p_actor
+       FOR UPDATE;
 
     -- Missing and owned by someone else are deliberately the same answer, so
     -- the API can report both as 404 and leak no existence.

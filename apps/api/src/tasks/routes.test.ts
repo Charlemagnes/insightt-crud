@@ -666,7 +666,7 @@ describe("POST /api/tasks/:id/done", () => {
       const response = await request(app).post(`/api/tasks/${task.id}/done`);
 
       // The Task is Done, which is what was asked for. Reporting this as a
-      // failure would make a retried request look like a lost one.
+      // failure would make a Replay look like a request that was lost.
       expect(response.status).toBe(200);
       expect(response.body.status).toBe("DONE");
     });
@@ -701,7 +701,7 @@ describe("POST /api/tasks/:id/done", () => {
     });
   });
 
-  it("completes once and succeeds twice when two requests race", async () => {
+  it("completes once and succeeds twice when the same Task is asked twice", async () => {
     const task = started();
     const { app } = harness({ tasks: [task] });
 
@@ -712,6 +712,12 @@ describe("POST /api/tasks/:id/done", () => {
 
     // One completion, two identical successes. Which request won is not the
     // point and is not asserted; that exactly one of them did is.
+    //
+    // This is the *route* holding up its end — two 200s, one body, one marked
+    // a Replay. It is not proof of the concurrency design: the fake runs on
+    // one event loop, where two requests cannot interleave. What serialises
+    // real callers is the single conditional UPDATE in
+    // `drizzle/0002_mark_task_done.sql`, and only Postgres can demonstrate it.
     expect([first.status, second.status]).toEqual([200, 200]);
     expect(first.body).toEqual(second.body);
     expect(
