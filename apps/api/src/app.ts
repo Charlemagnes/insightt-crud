@@ -29,9 +29,6 @@ export interface AppDependencies {
   log?: LogSink;
 }
 
-/** A body larger than this is not a Task, it is an attack or a mistake. */
-const MAX_BODY_SIZE = "100kb";
-
 export function createApp({
   taskRepository,
   requireAuth,
@@ -59,7 +56,7 @@ export function createApp({
       exposedHeaders: ["ETag", "X-Idempotent-Replay"],
     }),
   );
-  app.use(express.json({ limit: MAX_BODY_SIZE }));
+  app.use(express.json());
 
   // Ahead of the `/api` router, which puts everything under it behind a token —
   // which is exactly what the docs cannot sit behind. See `docs/router.ts`.
