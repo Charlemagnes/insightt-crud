@@ -1,5 +1,11 @@
 # Four checks, cheapest first, so the slow one only runs on a commit that has
 # already passed the others.
+#
+# `set -e` is not decoration. Husky's runner supplies it today, but plain `sh`
+# does not abort on a failing command, and a script's exit code is its *last*
+# command's — so without this, a failed typecheck followed by a passing test
+# run would exit 0 and wave the commit through.
+set -e
 
 # 1. Prettier over the staged files, which lint-staged re-stages. Formatting is
 #    not a thing to have an opinion about twice, so nothing here reports it —
