@@ -1,5 +1,6 @@
 "use client";
 
+import type { Task } from "@insightt/shared";
 import { Button, Flex, Layout } from "antd";
 import { useState } from "react";
 
@@ -24,11 +25,22 @@ export default function Home() {
   );
 }
 
+/**
+ * What the Task form is open for: a new Task when there is no `task`, an
+ * existing one when there is, and nothing at all when it is `null`.
+ *
+ * One piece of state rather than two, because the form is one modal and
+ * "creating" and "editing" are the same modal being open — two booleans could
+ * disagree and leave it open with no answer about what it is editing.
+ */
+type FormTarget = { task?: Task } | null;
+
 function TaskListScreen() {
   const { data, isPending, isError, error, refetch } = useTasks();
-  // The screen owns whether the create modal is open, because two things open
-  // it: the button below and the empty state's call to action.
-  const [creating, setCreating] = useState(false);
+  // The screen owns the form, because three things open it: the button below,
+  // the empty state's call to action, and every row's Edit control.
+  const [formTarget, setFormTarget] = useState<FormTarget>(null);
+  const openCreate = () => setFormTarget({});
 
   return (
     <Layout style={{ minHeight: "100vh", background: "transparent" }}>
@@ -45,17 +57,18 @@ function TaskListScreen() {
         ) : (
           <Flex vertical gap={16}>
             <Flex justify="flex-end">
-              <Button type="primary" onClick={() => setCreating(true)}>
+              <Button type="primary" onClick={openCreate}>
                 New task
               </Button>
             </Flex>
             <TaskTable
               tasks={data?.items ?? []}
               loading={isPending}
+              onEdit={(task) => setFormTarget({ task })}
               // The same modal the button above opens, reached from the one
               // place a person with no Tasks is actually looking.
               emptyAction={
-                <Button type="primary" onClick={() => setCreating(true)}>
+                <Button type="primary" onClick={openCreate}>
                   Create your first task
                 </Button>
               }
@@ -63,7 +76,11 @@ function TaskListScreen() {
           </Flex>
         )}
       </Content>
-      <TaskFormModal open={creating} onClose={() => setCreating(false)} />
+      <TaskFormModal
+        open={formTarget !== null}
+        task={formTarget?.task}
+        onClose={() => setFormTarget(null)}
+      />
     </Layout>
   );
 }

@@ -1,4 +1,4 @@
-import type { Task, TaskStatus } from "@insightt/shared";
+import type { Task, TaskStatus, UpdateTaskInput } from "@insightt/shared";
 
 /**
  * What a list read needs to know. Every read is scoped to one Owner, which is
@@ -39,6 +39,37 @@ export interface OwnerScopedTaskDraft {
   title: string;
   description: string | null;
 }
+
+/**
+ * An edit, and the Version the Actor believed the Task was at.
+ *
+ * `expectedVersion` is not optional. A write with no Version to check against
+ * is the clobbering this whole mechanism exists to prevent, so the type refuses
+ * to describe one; the route turns a missing `If-Match` into `428` before it
+ * gets this far.
+ *
+ * `changes` is the shared `UpdateTaskInput`, whose two fields already mean
+ * exactly what storage needs them to: an absent key leaves the column alone,
+ * and `description: null` clears it.
+ */
+export interface OwnerScopedTaskEdit extends OwnerScopedTaskQuery {
+  expectedVersion: number;
+  changes: UpdateTaskInput;
+}
+
+/**
+ * What a guarded edit did.
+ *
+ * `stale` is its own outcome rather than a flavour of refusal: the Task is
+ * real, the Actor owns it, and the only thing wrong is that it moved on since
+ * they read it. That is `412 VERSION_CONFLICT`, which the frontend recovers
+ * from by refreshing — a different thing entirely from the `404` a Task that
+ * is not there gets.
+ */
+export type UpdateResult =
+  | { outcome: "changed"; task: Task }
+  | { outcome: "stale"; task: Task }
+  | { outcome: "not_found" };
 
 /** One page of Tasks, plus the count the pager needs to size itself. */
 export interface TaskListResult {
@@ -107,6 +138,20 @@ export interface TaskRepository {
    * can produce a Task that starts anywhere else.
    */
   create(draft: OwnerScopedTaskDraft): Promise<Task>;
+
+  /**
+   * Changes the fields an edit names, but only while the Task is still at
+   * `expectedVersion`.
+   *
+   * One guarded statement, like every Transition: the Version is part of the
+   * `WHERE`, so two Actors editing the same Task from the same read cannot both
+   * win. The loser matches no row and comes back `stale`.
+   *
+   * The whitelist that decides *which* fields a Status leaves open is not asked
+   * here. It needs the Task, it is the same rule in both implementations, and
+   * it is the route's to enforce — see `assertEditable` in `routes.ts`.
+   */
+  update(edit: OwnerScopedTaskEdit): Promise<UpdateResult>;
 
   /**
    * Moves a `PENDING` Task to `IN_PROGRESS`, through one guarded statement.

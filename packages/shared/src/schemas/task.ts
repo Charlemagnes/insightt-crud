@@ -108,6 +108,46 @@ export type CreateTaskInput = z.infer<typeof CreateTaskInput>;
 export type CreateTaskDraft = z.input<typeof CreateTaskInput>;
 
 /**
+ * The body of `PATCH /api/tasks/:id`.
+ *
+ * Both fields are optional because an edit names what it is changing and leaves
+ * everything else alone. What it may not do is name nothing at all: the
+ * refinement below refuses `{}`, so a request that asks for no change is a
+ * `422` rather than a Version raised for nothing.
+ *
+ * `description` accepts an explicit `null`, which is the one thing omitting the
+ * key cannot mean. Omitted is "leave the description as it is"; `null` — and a
+ * text area someone emptied, which the transform makes the same value — is
+ * "clear it".
+ *
+ * **`status` is absent here too**, for the reason it is absent from
+ * `CreateTaskInput`: the Transition endpoints are the only way a Task moves,
+ * and `strictObject` turns a `status` key into a `422` instead of a field
+ * quietly ignored.
+ *
+ * Which of the two fields an edit may actually name depends on the Task's
+ * Status, and that whitelist is not expressible here — it needs the Task. It
+ * lives in `rules/transitions.ts` as `canEdit`, and the API answers a violation
+ * with `422 FIELD_NOT_EDITABLE`.
+ */
+export const UpdateTaskInput = z
+  .strictObject({
+    title: title.optional(),
+    description: description.optional(),
+  })
+  .refine(
+    (input) => input.title !== undefined || input.description !== undefined,
+    // Pathless on purpose: it is the edit as a whole that is empty, and no
+    // single field is at fault. `attachIssues` in `apps/web` reports an issue
+    // it cannot place on a field rather than dropping it.
+    { message: "An edit must change the title or the description" },
+  );
+/** What a handler receives: trimmed, with a blank description already `null`. */
+export type UpdateTaskInput = z.infer<typeof UpdateTaskInput>;
+/** What a client may send: the form's shape, before any of that has happened. */
+export type UpdateTaskDraft = z.input<typeof UpdateTaskInput>;
+
+/**
  * The list envelope: `{ items, page, pageSize, total }`. Offset pagination,
  * because Ant Design's `Table` needs a total count to render its pager.
  */

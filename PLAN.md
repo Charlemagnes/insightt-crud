@@ -254,9 +254,20 @@ carry `ETag: "<version>"`. `PATCH` requires `If-Match`:
 |---|---|
 | `If-Match` absent | `428` `PRECONDITION_REQUIRED` |
 | `If-Match` stale | `412` `VERSION_CONFLICT` |
+| `If-Match` unreadable as a version (`*`, a weak tag) | `412` `VERSION_CONFLICT` |
 
 `412` rather than `409` so the frontend can tell "someone else changed this" from
-"that action isn't allowed here" without string-matching a message.
+"that action isn't allowed here" without string-matching a message. An `If-Match`
+that names no version this API could have issued is left to fail the comparison
+rather than rejected separately: no task is at a version that cannot be written
+down, so it can only ever be stale.
+
+**A `PATCH` that would change nothing is refused**, as `422 VALIDATION_FAILED` —
+both the empty body `{}`, which the shared schema's refinement catches, and a
+body whose every field already holds the value it asks for, which needs the task
+and so is checked in the route. The version is the record that a task changed;
+raising it for a write that changed nothing would invalidate every other tab's
+`If-Match` over an edit that never happened.
 
 **Pagination.** Offset-based, since Ant Design's `Table` needs a total count.
 The list query selects `count(*) over() as total` alongside the rows, so one
@@ -313,7 +324,11 @@ owner-scoped end to end, so a non-owner cannot address the task at all.
 
 **Field mutability by status.** A documented whitelist; no typo-detection
 heuristic, no similarity threshold. Anything outside it is
-`422 FIELD_NOT_EDITABLE`.
+`422 FIELD_NOT_EDITABLE`. The whitelist needs the task, so `PATCH` reads it
+before it writes — and that read cannot go stale in a way that matters, because
+every transition raises the version and a task that moved in between fails the
+`If-Match` guard. The machine only ever narrows what is editable, so the worst
+the read can be is too permissive, which is exactly what the guard catches.
 
 | Status | Edit title | Edit description | Delete | Next transition |
 |---|---|---|---|---|
@@ -507,7 +522,7 @@ export const UpdateTaskInput = z.strictObject({
   title: title.optional(),
   description: description.optional(),
 }).refine(v => v.title !== undefined || v.description !== undefined,
-          { message: 'At least one field must be provided' });
+          { message: 'An edit must change the title or the description' });
 
 export const TaskListQuery = z.object({
   page:     z.coerce.number().int().min(1).default(1),

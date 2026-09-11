@@ -1,6 +1,11 @@
 "use client";
 
-import { canTransition, type Task, type TaskStatus } from "@insightt/shared";
+import {
+  canEditAnything,
+  canTransition,
+  type Task,
+  type TaskStatus,
+} from "@insightt/shared";
 import { App, Button, Space } from "antd";
 import type { ButtonProps } from "antd";
 
@@ -18,9 +23,14 @@ import {
  * every control, disabled where the move is not legal from that Status rather
  * than hidden: the shape of the lifecycle stays visible, and a cell that
  * changes shape per row is harder to scan than one that greys out. An
- * `ARCHIVED` Task shows all three disabled, which is what terminal looks like.
+ * `ARCHIVED` Task shows all of them disabled, which is what terminal looks
+ * like.
+ *
+ * Edit is the one control that is not a Transition, and it asks a different
+ * question: `canEditAnything`, which is `false` only for `ARCHIVED` — a Task
+ * that is finished and put away has no field left to change.
  */
-export function TaskActions({ task }: { task: Task }) {
+export function TaskActions({ task, onEdit }: TaskActionsProps) {
   const { message } = App.useApp();
   const start = useStartTask();
   const done = useMarkTaskDone();
@@ -69,6 +79,9 @@ export function TaskActions({ task }: { task: Task }) {
 
   return (
     <Space>
+      <Button size="small" disabled={!canEditAnything(task.status)} onClick={() => onEdit(task)}>
+        Edit
+      </Button>
       <TransitionButton
         task={task}
         to="IN_PROGRESS"
@@ -93,6 +106,15 @@ export function TaskActions({ task }: { task: Task }) {
       />
     </Space>
   );
+}
+
+interface TaskActionsProps {
+  task: Task;
+  /**
+   * Opens the edit form on this Task. The screen owns which Task is being
+   * edited, so there is one form for the whole table rather than one per row.
+   */
+  onEdit: (task: Task) => void;
 }
 
 interface TransitionButtonProps {

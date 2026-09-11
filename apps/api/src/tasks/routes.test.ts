@@ -1,11 +1,14 @@
 import {
+  canEdit,
   canTransition,
+  EDITABLE_FIELDS,
   LIFECYCLE,
   statusBefore,
   TaskPageSchema,
   TaskSchema,
   type TaskStatus,
 } from "@insightt/shared";
+import type { Express } from "express";
 import request from "supertest";
 
 import {
@@ -502,6 +505,501 @@ describe("POST /api/tasks", () => {
       await request(app).post("/api/tasks").send({ title: "" });
 
       expect(create).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("PATCH /api/tasks/:id", () => {
+  /** The `If-Match` a client holding `version` would send. */
+  const etagFor = (version: number) => `"${version}"`;
+
+  /** An edit request carrying a precondition the caller chose. */
+  const editAt = (app: Express, task: OwnedTask, ifMatch: string) =>
+    request(app).patch(`/api/tasks/${task.id}`).set("If-Match", ifMatch);
+
+  /**
+   * An edit against the Task's Version as it stands right now.
+   *
+   * Read at call time, not captured: the in-memory repository edits the seeded
+   * Task in place, so a tag bound once would go stale the moment a test made
+   * two edits — which is a real conflict to assert deliberately, never one to
+   * trip over. `editAt` is for that.
+   */
+  const editing = (app: Express, task: OwnedTask) =>
+    editAt(app, task, etagFor(task.version));
+
+  it("changes the title and raises the Version", async () => {
+    const task = aTask({ title: "Before", version: 1 });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await editing(app, task).send({ title: "After" });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: task.id,
+      title: "After",
+      // Raised, so the `If-Match` this caller was holding stops matching and a
+      // second tab's stale edit is refused rather than applied on top.
+      version: 2,
+    });
+  });
+
+  it("returns a response the shared schema accepts, with the new ETag", async () => {
+    const task = aTask({ version: 3 });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await editing(app, task).send({ title: "After" });
+
+    expect(() => TaskSchema.parse(response.body)).not.toThrow();
+    // The tag the next edit hands back, without re-reading the Task to get it.
+    expect(response.headers.etag).toBe('"4"');
+  });
+
+  it("leaves a field the edit did not name alone", async () => {
+    const task = aTask({ title: "Before", description: "Keep me" });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await editing(app, task).send({ title: "After" });
+
+    expect(response.body.description).toBe("Keep me");
+  });
+
+  it("clears a description when the edit says null", async () => {
+    const task = aTask({ description: "Remove me" });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await editing(app, task).send({ description: null });
+
+    // The one thing omitting the key cannot mean.
+    expect(response.status).toBe(200);
+    expect(response.body.description).toBeNull();
+  });
+
+  it("reads an emptied text area as a cleared description", async () => {
+    const task = aTask({ description: "Remove me" });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await editing(app, task).send({ description: "   " });
+
+    expect(response.body.description).toBeNull();
+  });
+
+  it("trims the title, as a create does", async () => {
+    const task = aTask({ title: "Before" });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await editing(app, task).send({ title: "  After  " });
+
+    expect(response.body.title).toBe("After");
+  });
+
+  it("makes the edit visible to the next read", async () => {
+    const task = aTask({ title: "Before" });
+    const { app } = harness({ tasks: [task] });
+
+    await editing(app, task).send({ title: "After" });
+    const after = await request(app).get(`/api/tasks/${task.id}`);
+
+    expect(after.body.title).toBe("After");
+    expect(after.headers.etag).toBe('"2"');
+  });
+
+  it("scopes the edit to the Actor", async () => {
+    const task = aTask();
+    const update = jest.fn(async () => ({ outcome: "not_found" }) as const);
+    const { app } = harness({ tasks: [task], taskRepository: { update } });
+
+    await editing(app, task).send({ title: "After" });
+
+    expect(update).toHaveBeenCalledWith({
+      userId: TEST_USER_ID,
+      id: task.id,
+      // The Version from the header, not one the body could have named.
+      expectedVersion: task.version,
+      changes: { title: "After" },
+    });
+  });
+
+  describe("the precondition", () => {
+    it("refuses an edit that sends no If-Match", async () => {
+      const task = aTask();
+      const { app } = harness({ tasks: [task] });
+
+      const response = await request(app)
+        .patch(`/api/tasks/${task.id}`)
+        .send({ title: "After" });
+
+      // 428 and not 412: no stale claim was made, no claim was made at all.
+      expect(response.status).toBe(428);
+      expect(response.body.error.code).toBe("PRECONDITION_REQUIRED");
+    });
+
+    it("writes nothing when the precondition is missing", async () => {
+      const task = aTask({ title: "Before" });
+      const { app } = harness({ tasks: [task] });
+
+      await request(app).patch(`/api/tasks/${task.id}`).send({ title: "After" });
+      const after = await request(app).get(`/api/tasks/${task.id}`);
+
+      expect(after.body).toEqual(asWireTask(task));
+    });
+
+    it("refuses an edit whose If-Match is a Version the Task has moved past", async () => {
+      const task = aTask({ title: "Before", version: 5 });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await request(app)
+        .patch(`/api/tasks/${task.id}`)
+        .set("If-Match", etagFor(4))
+        .send({ title: "After" });
+
+      expect(response.status).toBe(412);
+      expect(response.body.error.code).toBe("VERSION_CONFLICT");
+    });
+
+    it("writes nothing when the precondition is stale", async () => {
+      const task = aTask({ title: "Before", version: 5 });
+      const { app } = harness({ tasks: [task] });
+
+      await request(app)
+        .patch(`/api/tasks/${task.id}`)
+        .set("If-Match", etagFor(4))
+        .send({ title: "After" });
+      const after = await request(app).get(`/api/tasks/${task.id}`);
+
+      expect(after.body).toEqual(asWireTask(task));
+    });
+
+    it("refuses an If-Match it cannot read as a Version", async () => {
+      const task = aTask();
+      const { app } = harness({ tasks: [task] });
+
+      const response = await request(app)
+        .patch(`/api/tasks/${task.id}`)
+        .set("If-Match", "*")
+        .send({ title: "After" });
+
+      // A wildcard names no Version, and no Task is at one that cannot be
+      // written down — so it is stale rather than a bad request.
+      expect(response.status).toBe(412);
+      expect(response.body.error.code).toBe("VERSION_CONFLICT");
+    });
+
+    it("lets only one of two edits from the same read succeed", async () => {
+      const task = aTask({ title: "Before", version: 1 });
+      const { app } = harness({ tasks: [task] });
+      // Both tabs read the Task once and hold that tag. Asking the repository
+      // for the Version again between the two would be the re-read this whole
+      // mechanism exists to make unnecessary.
+      const held = etagFor(task.version);
+
+      const first = await editAt(app, task, held).send({ title: "Mine" });
+      const second = await editAt(app, task, held).send({ title: "Theirs" });
+
+      expect(first.status).toBe(200);
+      // The second held the Version the first consumed. This is the whole
+      // point: the loser is told, not silently applied on top.
+      expect(second.status).toBe(412);
+      expect(second.body.error.code).toBe("VERSION_CONFLICT");
+    });
+
+    it("keeps the winner's edit when the loser is refused", async () => {
+      const task = aTask({ title: "Before" });
+      const { app } = harness({ tasks: [task] });
+      const held = etagFor(task.version);
+
+      await editAt(app, task, held).send({ title: "Mine" });
+      await editAt(app, task, held).send({ title: "Theirs" });
+      const after = await request(app).get(`/api/tasks/${task.id}`);
+
+      expect(after.body.title).toBe("Mine");
+      expect(after.body.version).toBe(2);
+    });
+
+    it("reports a stale Version differently from an illegal Transition", async () => {
+      const stale = aTask({ status: "PENDING", version: 2 });
+      const archived = aTask({ status: "ARCHIVED" });
+      const { app } = harness({ tasks: [stale, archived] });
+
+      const [conflict, transition] = await Promise.all([
+        request(app)
+          .patch(`/api/tasks/${stale.id}`)
+          .set("If-Match", etagFor(1))
+          .send({ title: "After" }),
+        request(app).post(`/api/tasks/${archived.id}/start`),
+      ]);
+
+      // 412 against 409. The frontend branches on the code, and the two have
+      // different recoveries: refresh and retry, against nothing to retry.
+      expect(conflict.body.error.code).toBe("VERSION_CONFLICT");
+      expect(transition.body.error.code).toBe("INVALID_TRANSITION");
+    });
+  });
+
+  describe("the field whitelist", () => {
+    it("lets a DONE Task's title be fixed", async () => {
+      const task = aTask({ status: "DONE", title: "Typo" });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({ title: "Fixed" });
+
+      expect(response.status).toBe(200);
+      expect(response.body.title).toBe("Fixed");
+    });
+
+    it("refuses a DONE Task's description", async () => {
+      const task = aTask({ status: "DONE", description: "The plan" });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({ description: "New" });
+
+      // The description is the plan, and the work is over.
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("FIELD_NOT_EDITABLE");
+    });
+
+    it("refuses the whole edit when one named field is closed", async () => {
+      const task = aTask({ status: "DONE", title: "Typo" });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({
+        title: "Fixed",
+        description: "New",
+      });
+      const after = await request(app).get(`/api/tasks/${task.id}`);
+
+      expect(response.status).toBe(422);
+      // Not partly applied: the title the same request also named is untouched.
+      expect(after.body.title).toBe("Typo");
+      expect(after.body.version).toBe(task.version);
+    });
+
+    it("names the closed field, so a form can mark it", async () => {
+      const task = aTask({ status: "DONE" });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({ description: "New" });
+
+      expect(response.body.error.details).toEqual([
+        expect.objectContaining({ path: ["description"] }),
+      ]);
+    });
+
+    it("refuses every field on an ARCHIVED Task", async () => {
+      const task = aTask({ status: "ARCHIVED" });
+      const { app } = harness({ tasks: [task] });
+
+      const [title, description] = await Promise.all([
+        editing(app, task).send({ title: "After" }),
+        editing(app, task).send({ description: "After" }),
+      ]);
+
+      // Archived is finished and put away (CONTEXT.md, "Archived").
+      expect(title.body.error.code).toBe("FIELD_NOT_EDITABLE");
+      expect(description.body.error.code).toBe("FIELD_NOT_EDITABLE");
+    });
+
+    it("reports a closed field differently from an illegal Transition", async () => {
+      const task = aTask({ status: "ARCHIVED" });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({ title: "After" });
+
+      // Both are "an ARCHIVED Task will not do that", and they are still
+      // different answers: nothing here is being asked to move.
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).not.toBe("INVALID_TRANSITION");
+    });
+
+    /** Every Status against every field the whitelist knows about. */
+    const everyField = LIFECYCLE.flatMap((status) =>
+      EDITABLE_FIELDS.map((field) => ({ status, field })),
+    );
+
+    it("tries every field against every Status", () => {
+      // The claim the table below rests on: this is the whole whitelist, not a
+      // sample of it.
+      expect(everyField).toHaveLength(LIFECYCLE.length * EDITABLE_FIELDS.length);
+    });
+
+    it.each(everyField)(
+      "agrees with canEdit about $field on a $status Task",
+      async ({ status, field }) => {
+        const task = aTask({ status, title: "Before", description: "Before" });
+        const { app } = harness({ tasks: [task] });
+
+        const response = await editing(app, task).send({ [field]: "After" });
+
+        // The API and the UI ask the same predicate, so an enabled input can
+        // never produce a FIELD_NOT_EDITABLE the person did not expect.
+        expect(response.status).toBe(canEdit(status, field) ? 200 : 422);
+      },
+    );
+  });
+
+  describe("edits it refuses outright", () => {
+    it("rejects an edit that names nothing", async () => {
+      const task = aTask();
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({});
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("rejects an edit whose fields already hold those values", async () => {
+      const task = aTask({ title: "Same", description: "Also same" });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({
+        title: "Same",
+        description: "Also same",
+      });
+
+      // A Version is the record that a Task changed. Raising it here would
+      // invalidate every other tab's If-Match over an edit that never happened.
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("leaves the Version alone when the edit changes nothing", async () => {
+      const task = aTask({ title: "Same", version: 1 });
+      const { app } = harness({ tasks: [task] });
+
+      await editing(app, task).send({ title: "Same" });
+      const after = await request(app).get(`/api/tasks/${task.id}`);
+
+      expect(after.body.version).toBe(1);
+    });
+
+    it("accepts an edit where only one of two fields differs", async () => {
+      const task = aTask({ title: "Same", description: "Before" });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({
+        title: "Same",
+        description: "After",
+      });
+
+      expect(response.status).toBe(200);
+    });
+
+    it("rejects a Status rather than silently dropping it", async () => {
+      const task = aTask({ status: "PENDING" });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({
+        title: "After",
+        status: "DONE",
+      });
+
+      // Status moves through the Transition endpoints only, so that
+      // `mark_task_done()` stays the single entrance to DONE.
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("leaves the Status alone when it refuses one", async () => {
+      const task = aTask({ status: "PENDING" });
+      const { app } = harness({ tasks: [task] });
+
+      await editing(app, task).send({ title: "After", status: "DONE" });
+      const after = await request(app).get(`/api/tasks/${task.id}`);
+
+      expect(after.body.status).toBe("PENDING");
+    });
+
+    it("rejects a Version in the body, which travels as a header", async () => {
+      const task = aTask();
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({
+        title: "After",
+        version: 99,
+      });
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("rejects a title beyond the cap", async () => {
+      const task = aTask();
+      const { app } = harness({ tasks: [task] });
+
+      const response = await editing(app, task).send({
+        title: "a".repeat(201),
+      });
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe("VALIDATION_FAILED");
+    });
+
+    it("never reaches the repository with an edit it refused", async () => {
+      const task = aTask();
+      const update = jest.fn(async () => ({ outcome: "not_found" }) as const);
+      const { app } = harness({ tasks: [task], taskRepository: { update } });
+
+      await editing(app, task).send({ title: "   " });
+
+      expect(update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Tasks it will not edit", () => {
+    it("reports a Task owned by someone else as NOT_FOUND", async () => {
+      const theirs = aTask({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const response = await editing(app, theirs).send({ title: "After" });
+
+      // 404 and not 412: a Task the Actor cannot see has no Version to be
+      // stale against.
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe("NOT_FOUND");
+    });
+
+    it("leaves another Actor's Task untouched", async () => {
+      const theirs = aTask({ title: "Theirs", ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+      const { app: theirApp } = harness({
+        tasks: [theirs],
+        requireAuth: authenticateAs(OTHER_USER_ID),
+      });
+
+      await editing(app, theirs).send({ title: "Mine now" });
+      const after = await request(theirApp).get(`/api/tasks/${theirs.id}`);
+
+      expect(after.body.title).toBe("Theirs");
+    });
+
+    it("answers identically for a Task that exists elsewhere and one that does not", async () => {
+      const theirs = aTask({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const [notOwned, absent] = await Promise.all([
+        editing(app, theirs).send({ title: "After" }),
+        request(app)
+          .patch(`/api/tasks/${ABSENT_ID}`)
+          .set("If-Match", etagFor(theirs.version))
+          .send({ title: "After" }),
+      ]);
+
+      expect(notOwned.status).toBe(absent.status);
+      expect(notOwned.body).toEqual(absent.body);
+    });
+
+    it("reports a malformed id as NOT_FOUND without reaching the repository", async () => {
+      const update = jest.fn(async () => ({ outcome: "not_found" }) as const);
+      const { app } = harness({ taskRepository: { update } });
+
+      const response = await request(app)
+        .patch(`/api/tasks/${MALFORMED_ID}`)
+        .set("If-Match", etagFor(1))
+        .send({ title: "After" });
+
+      expect(response.status).toBe(404);
+      expect(update).not.toHaveBeenCalled();
     });
   });
 });

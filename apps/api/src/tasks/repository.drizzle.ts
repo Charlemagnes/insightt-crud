@@ -9,10 +9,12 @@ import type {
   MarkDoneResult,
   OwnerScopedListQuery,
   OwnerScopedTaskDraft,
+  OwnerScopedTaskEdit,
   OwnerScopedTaskQuery,
   TaskListResult,
   TaskRepository,
   TransitionResult,
+  UpdateResult,
 } from "@/tasks/repository";
 
 /**
@@ -108,6 +110,46 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
       }
 
       return toTask(row);
+    },
+
+    async update({
+      userId,
+      id,
+      expectedVersion,
+      changes,
+    }: OwnerScopedTaskEdit): Promise<UpdateResult> {
+      // The Version is in the `WHERE`, which is what makes this optimistic
+      // locking rather than a read followed by a hopeful write: two Actors
+      // holding the same Version both run this, and the second matches no row.
+      const [row] = await db
+        .update(tasks)
+        // Spread rather than named: a field the edit did not name is not a key
+        // here, so `set` leaves that column alone. `updated_at` is the
+        // trigger's, and `version` is raised so the `If-Match` the caller is
+        // still holding stops matching.
+        .set({ ...changes, version: sql`${tasks.version} + 1` })
+        .where(
+          and(
+            eq(tasks.id, id),
+            eq(tasks.ownerId, userId),
+            eq(tasks.version, expectedVersion),
+          ),
+        )
+        .returning();
+
+      if (row) {
+        return { outcome: "changed", task: toTask(row) };
+      }
+
+      // Nothing matched, and the caller needs to know whether that is a `404`
+      // or a `412` — the same second read `transition` does, for the same
+      // reason and with the same caveat: either answer is a refusal, and the
+      // edit did not happen.
+      const current = await selectOwned(db, { userId, id });
+
+      return current
+        ? { outcome: "stale", task: toTask(current) }
+        : { outcome: "not_found" };
     },
 
     async start(query: OwnerScopedTaskQuery): Promise<TransitionResult> {
