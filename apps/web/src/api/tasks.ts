@@ -7,7 +7,12 @@ import {
   type UpdateTaskInput,
 } from "@insightt/shared";
 
-import { apiFetch, apiFetchWithHeaders, jsonRequest } from "@/api/client";
+import {
+  apiFetch,
+  apiFetchWithHeaders,
+  apiSend,
+  jsonRequest,
+} from "@/api/client";
 
 /** The Transition endpoints take no body — the target Status is in the path. */
 const TRANSITION_REQUEST: RequestInit = { method: "POST" };
@@ -64,6 +69,21 @@ export function updateTask({
     // API issued and that tag is quoted.
     headers: { ...init.headers, "If-Match": `"${version}"` },
   });
+}
+
+/**
+ * Deletes a Task. Allowed from every Status, including `ARCHIVED` — terminal
+ * describes the Transitions a Task has left, not whether it can be removed.
+ *
+ * No Version travels with it, unlike an edit: a delete overwrites nothing, so
+ * there is no stale write for a precondition to refuse. A Task that is already
+ * gone comes back `404`, not a success — deleting is not a Replay.
+ *
+ * Nothing is returned because the API answers `204`: the Task it described does
+ * not exist any more.
+ */
+export async function deleteTask(id: string): Promise<void> {
+  await apiSend(`/api/tasks/${id}`, { method: "DELETE" });
 }
 
 /** Starts a Task: `PENDING → IN_PROGRESS`. */

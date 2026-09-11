@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   archiveTask,
   createTask,
+  deleteTask,
   markTaskDone,
   startTask,
   updateTask,
@@ -104,6 +105,22 @@ export function useArchiveTask() {
   });
 }
 
+/**
+ * Deleting a Task. The row goes immediately and comes back if the delete fails.
+ *
+ * The only mutation that changes the *shape* of the page rather than one row,
+ * which is why it hands `useOptimisticPage` a page transform directly: there is
+ * no row left to overwrite from a response, and the API answers `204` with
+ * nothing to overwrite it from. `onSettled` refetches, so the server has the
+ * last word on `total` either way.
+ */
+export function useDeleteTask() {
+  return useOptimisticPage<string, void>({
+    run: deleteTask,
+    inFlight: withoutRow,
+  });
+}
+
 /** Every Transition addresses its Task by id and asks for nothing else. */
 const identity = (id: string) => id;
 
@@ -119,13 +136,48 @@ interface TaskRowMutation<Variables, Result> {
 }
 
 /**
- * The per-row mutation policy from PLAN.md §12, in one place: snapshot the
- * cache on mutate, restore it on error, overwrite the row from the response on
- * success, and invalidate once it has settled.
+ * The per-row mutation policy from PLAN.md §12, as the two page transforms
+ * `useOptimisticPage` applies: one row replaced while the request is in flight,
+ * and the same row overwritten from the response.
  *
  * Overwriting rather than leaving the optimistic row in place is what keeps
  * `version` honest. The browser cannot know what the Version became, and a
  * guessed one would be sent as the next `If-Match` and refused as stale.
+ */
+function useTaskRowMutation<Variables, Result>({
+  run,
+  idOf,
+  inFlight,
+  taskIn,
+}: TaskRowMutation<Variables, Result>) {
+  return useOptimisticPage<Variables, Result>({
+    run,
+    inFlight: (page, variables) =>
+      withRow(page, idOf(variables), (task) => inFlight(task, variables)),
+    confirmed: (page, result) => {
+      const task = taskIn(result);
+
+      return withRow(page, task.id, () => task);
+    },
+  });
+}
+
+interface OptimisticPageMutation<Variables, Result> {
+  /** The request this mutation makes. */
+  run: (variables: Variables) => Promise<Result>;
+  /** How the cached page should look while the request is in flight. */
+  inFlight: (page: TaskPage, variables: Variables) => TaskPage;
+  /**
+   * How it should look once the API has answered. Omitted where the response
+   * has nothing to correct the optimistic page with — a `204` carries no body.
+   */
+  confirmed?: (page: TaskPage, result: Result) => TaskPage;
+}
+
+/**
+ * The cache policy every optimistic mutation shares (PLAN.md §12): snapshot on
+ * mutate, restore on error, correct from the response on success, invalidate
+ * once it has settled.
  *
  * Invalidating on **settle** rather than on success is what makes a version
  * conflict a refresh rather than a silent rollback: the edit lost, the rollback
@@ -135,12 +187,11 @@ interface TaskRowMutation<Variables, Result> {
  * `cancelQueries` first, because an in-flight list refetch that lands after the
  * optimistic write would put the old row back and make the click look ignored.
  */
-function useTaskRowMutation<Variables, Result>({
+function useOptimisticPage<Variables, Result>({
   run,
-  idOf,
   inFlight,
-  taskIn,
-}: TaskRowMutation<Variables, Result>) {
+  confirmed,
+}: OptimisticPageMutation<Variables, Result>) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -152,9 +203,7 @@ function useTaskRowMutation<Variables, Result>({
       const snapshot = queryClient.getQueryData<TaskPage>(tasksQueryKey);
 
       queryClient.setQueryData<TaskPage>(tasksQueryKey, (page) =>
-        page
-          ? withRow(page, idOf(variables), (task) => inFlight(task, variables))
-          : page,
+        page ? inFlight(page, variables) : page,
       );
 
       return { snapshot };
@@ -162,17 +211,17 @@ function useTaskRowMutation<Variables, Result>({
 
     onError: (_error, _variables, context) => {
       // Put back exactly what was there. The mutation rejected, so the row the
-      // person is looking at has to go back to what the server still holds.
+      // person is looking at has to come back — for a delete, literally.
       if (context?.snapshot) {
         queryClient.setQueryData(tasksQueryKey, context.snapshot);
       }
     },
 
     onSuccess: (result) => {
-      const task = taskIn(result);
+      if (!confirmed) return;
 
       queryClient.setQueryData<TaskPage>(tasksQueryKey, (page) =>
-        page ? withRow(page, task.id, () => task) : page,
+        page ? confirmed(page, result) : page,
       );
     },
 
@@ -191,5 +240,23 @@ function withRow(
   return {
     ...page,
     items: page.items.map((task) => (task.id === id ? change(task) : task)),
+  };
+}
+
+/**
+ * The page with one row gone, and `total` lowered to match.
+ *
+ * Lowering `total` is not cosmetic: it is the number the pager sizes itself
+ * from, and a count still claiming the deleted Task would offer a page that is
+ * no longer there. It moves only if the row was actually on this page, so a
+ * delete the cache never held does not quietly lose a Task from the count.
+ */
+function withoutRow(page: TaskPage, id: string): TaskPage {
+  const items = page.items.filter((task) => task.id !== id);
+
+  return {
+    ...page,
+    items,
+    total: page.total - (page.items.length - items.length),
   };
 }

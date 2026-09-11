@@ -73,6 +73,27 @@ export async function apiFetchWithHeaders<Output>(
   schema: z.ZodType<Output>,
   init: RequestInit = {},
 ): Promise<{ body: Output; headers: Headers }> {
+  const response = await apiSend(path, init);
+
+  return {
+    body: schema.parse(await response.json()),
+    headers: response.headers,
+  };
+}
+
+/**
+ * The request itself, up to and including the failure mapping, with the
+ * response handed back unread.
+ *
+ * Delete is the one call that uses it directly: the API answers `204`, and
+ * `response.json()` on an empty body throws — so a success would arrive as a
+ * parse error about a Task that was removed exactly as asked. Everything else
+ * goes through the two wrappers above, which read and validate the body.
+ */
+export async function apiSend(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
   const { getAccessToken, login } = useSessionStore.getState();
   const token = await getAccessToken();
 
@@ -97,10 +118,7 @@ export async function apiFetchWithHeaders<Output>(
     throw failure;
   }
 
-  return {
-    body: schema.parse(await response.json()),
-    headers: response.headers,
-  };
+  return response;
 }
 
 async function describeFailure(response: Response): Promise<ApiError> {

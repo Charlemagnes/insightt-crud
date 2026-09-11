@@ -236,7 +236,7 @@ JSON REST. All routes require a valid Auth0 access token.
 | `POST` | `/api/tasks/:id/start` | `PENDING → IN_PROGRESS` | `200` + `Task` |
 | `POST` | `/api/tasks/:id/done` | `IN_PROGRESS → DONE`, idempotent | `200` + `Task` |
 | `POST` | `/api/tasks/:id/archive` | `DONE → ARCHIVED` | `200` + `Task` |
-| `DELETE` | `/api/tasks/:id` | Delete, allowed from any status | `204` |
+| `DELETE` | `/api/tasks/:id` | Delete, allowed from any status; no `If-Match` | `204` |
 
 State changes are dedicated endpoints rather than `PATCH { status }`, which
 keeps the transition rules and the idempotent Done path explicit and leaves
@@ -246,6 +246,11 @@ validate and nothing a client can contradict.
 
 Every mutation except `DELETE` returns the full `Task`, because §12's optimistic
 updates overwrite the cache from the response body so `version` self-corrects.
+`DELETE` answers `204` with no body and no `ETag` — there is no Task left to
+describe — and takes no `If-Match`: a Version protects an edit from overwriting
+words someone else wrote, and a delete overwrites nothing. A second `DELETE` of
+the same task is `404`, not a replay; the task is gone, so there is nothing to
+report success about.
 
 **Optimistic concurrency.** `GET /api/tasks/:id` and every mutation response
 carry `ETag: "<version>"`. `PATCH` requires `If-Match`:
