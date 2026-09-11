@@ -79,7 +79,8 @@ apps/web/src/     app/{layout,page}.tsx
                   config.ts
                   providers/{Auth0,Query,Antd}.tsx
                   components/auth/    RequireAuth  LandingPanel
-                                      LoginButton  LogoutButton
+                                      LoginButton  SignUpButton
+                                      LogoutButton
                   components/tasks/   TaskListScreen  TaskTable
                                       TaskFormModal   TaskStatusTag
                                       TaskActions     TaskFilters
@@ -478,6 +479,14 @@ inbound line it belongs under.
 - `@auth0/auth0-react` in the SPA: Authorization Code + PKCE, `audience` set to
   the API identifier, RS256, **Universal Login** (Auth0 hosts the login and
   signup screens; the app never sees a password and builds no credential form).
+- **Registration is the same redirect**, with
+  `authorizationParams: { screen_hint: 'signup' }` opening the signup screen
+  instead of the login one. There is no second flow to write: Auth0 creates the
+  user, signs them in, and returns to the same callback with the same `?code=`,
+  so `onRedirectCallback` and everything downstream of it are already the
+  registration path. `screen_hint` is honoured by the **New** Universal Login
+  only — a tenant left on Classic lands on the login screen, from which "Sign
+  up" is still one link away.
 - `cacheLocation: 'localstorage'` with `useRefreshTokens: true` and rotation, so
   the session survives a page reload. The alternative — in-memory caching — puts
   the refresh token in memory too, so a reload falls back to hidden-iframe silent
@@ -747,7 +756,7 @@ every moment is specified rather than left to the component defaults:
 | Moment                    | Behaviour                                                                                                   |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Auth0 `isLoading`         | full-page `Spin`, no layout flash                                                                           |
-| Unauthenticated           | `LandingPanel` with a single "Log in" button                                                                |
+| Unauthenticated           | `LandingPanel` with "Log in" and "Sign up" — the second is §10's `screen_hint`                              |
 | List first load           | `Table loading={isPending}`                                                                                 |
 | List page change          | `placeholderData: keepPreviousData` — the table dims instead of emptying                                    |
 | Zero tasks                | `Empty` with a "Create your first task" CTA                                                                 |
@@ -871,6 +880,14 @@ calls `useAuth0()` directly and so draws a blank name and an inert Logout
 button: no assertion here concerns it, and a fake `Auth0Provider` would be
 faking something the Task list itself never touches. Signing in for real is
 test 3's job.
+
+`components/auth/LandingPanel.test.tsx` is the one place `useAuth0` _is_ faked,
+and the exception proves the rule: what it asserts is the argument each button
+hands the SDK — nothing at all for Log in, `screen_hint: 'signup'` for Sign up
+— which is precisely the call a real provider would answer with a redirect off
+the page. The failure it guards against is silent rather than visible: a Sign
+up button that drops the hint still renders, and still works, and lands someone
+with no account on a login form.
 
 **3. E2E — Cypress** (`cypress/e2e/task-list.cy.ts`, one spec)
 The login flow, using the Regular Web Application from §10 with

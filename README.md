@@ -35,8 +35,10 @@ npm run db:migrate           # create the table, the trigger and the function
 npm run dev                  # Express on :4000, Next on :3000
 ```
 
-Then open <http://localhost:3000> and sign up — signups are left enabled so a
-reviewer can register and click around.
+Then open <http://localhost:3000> and press **Sign up** on the landing screen.
+It is the same Auth0 redirect "Log in" makes, aimed at the signup screen rather
+than the login one; signups are left enabled on the tenant so a reviewer can
+register and click around.
 
 `scripts/setup-auth0.sh` is an interactive wizard, not a script that runs
 unattended. It walks the parts of the Auth0 dashboard only a human can click,
@@ -360,6 +362,12 @@ Auth0 is left out rather than mocked: the test renders the screen rather than
 the page and seeds the session store directly, so everything reading that store
 — the API client's token included — behaves as it does signed in. Signing in for
 real is test 3's job.
+
+The signed-out screen has a small suite of its own, and it is the one place
+`useAuth0` is faked, because what it asserts is the argument each button hands
+the SDK: nothing for **Log in**, `screen_hint: 'signup'` for **Sign up**. A
+Sign up button that lost the hint would still render and still sign people in,
+and would land someone with no account on a login form.
 
 ### 3. End to end — Cypress against the real tenant
 

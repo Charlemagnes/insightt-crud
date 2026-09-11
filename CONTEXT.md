@@ -1,7 +1,8 @@
 # Task List
 
-An authenticated task tracker. People sign in through Auth0, create tasks they
-alone can see, and move each task through a fixed forward-only lifecycle.
+An authenticated task tracker. People sign up or sign in through Auth0, create
+tasks they alone can see, and move each task through a fixed forward-only
+lifecycle.
 
 ## Language
 
