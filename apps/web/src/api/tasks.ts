@@ -3,7 +3,9 @@ import {
   TaskSchema,
   type CreateTaskInput,
   type Task,
+  type TaskListQuery,
   type TaskPage,
+  type TaskStatus,
   type UpdateTaskInput,
 } from "@insightt/shared";
 
@@ -17,9 +19,39 @@ import {
 /** The Transition endpoints take no body — the target Status is in the path. */
 const TRANSITION_REQUEST: RequestInit = { method: "POST" };
 
+/**
+ * Which page of Tasks to read, and how to narrow it — the shared query schema's
+ * own fields, not a second copy of them (PLAN.md §11).
+ *
+ * `status` is the one field that differs, and only in how "no filter" is
+ * spelled. The schema has it optional because a query string says so by leaving
+ * the key out; a view has to hold an answer either way, and `null` is that
+ * answer — an absent property would make "unfiltered" and "not decided yet" the
+ * same value, which is how a filter reset goes missing.
+ */
+export type TaskListParams = Omit<TaskListQuery, "status"> & {
+  status: TaskStatus | null;
+};
+
 /** One page of the Actor's own Tasks, newest first. */
-export function listTasks(): Promise<TaskPage> {
-  return apiFetch("/api/tasks", TaskPageSchema);
+export function listTasks({
+  page,
+  pageSize,
+  status,
+}: TaskListParams): Promise<TaskPage> {
+  const query = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+
+  // Omitted rather than sent empty: `?status=` is a Status the enum does not
+  // have and would be refused as `422`, where no key at all is the unfiltered
+  // list the API already defaults to.
+  if (status !== null) {
+    query.set("status", status);
+  }
+
+  return apiFetch(`/api/tasks?${query.toString()}`, TaskPageSchema);
 }
 
 /**

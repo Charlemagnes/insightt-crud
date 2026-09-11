@@ -6,10 +6,10 @@ import { createApp } from "@/app";
 import type { LogRecord } from "@/middleware/logging";
 import type { TaskRepository } from "@/tasks/repository";
 import {
-  createMemoryTaskRepository,
+  createFakeTaskRepository,
   withoutOwner,
   type OwnedTask,
-} from "@/tasks/repository.memory";
+} from "@/tasks/repository.fake";
 
 export const WEB_ORIGIN = "http://localhost:3000";
 export const TEST_USER_ID = "auth0|test-actor";
@@ -62,7 +62,7 @@ export function harness(options: HarnessOptions = {}): Harness {
   const records: LogRecord[] = [];
 
   const taskRepository: TaskRepository = {
-    ...createMemoryTaskRepository(options.tasks),
+    ...createFakeTaskRepository(options.tasks),
     ...options.taskRepository,
   };
 

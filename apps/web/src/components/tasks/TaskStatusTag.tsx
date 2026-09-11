@@ -7,8 +7,12 @@ import { Tag } from "antd";
  * How each Status reads to a person. The enum values are the wire's spelling,
  * not a label — `IN_PROGRESS` shouted in a table cell is the database leaking
  * into the interface.
+ *
+ * Exported because the Status filter offers the same four words, and a second
+ * mapping would let a tag and the option that selects it disagree about what
+ * the Status is called.
  */
-const LABELS: Record<TaskStatus, string> = {
+export const STATUS_LABELS: Record<TaskStatus, string> = {
   PENDING: "Pending",
   IN_PROGRESS: "In progress",
   DONE: "Done",
@@ -29,5 +33,5 @@ const COLOURS: Record<TaskStatus, string> = {
 
 /** A Task's Status, as a reader sees it. */
 export function TaskStatusTag({ status }: { status: TaskStatus }) {
-  return <Tag color={COLOURS[status]}>{LABELS[status]}</Tag>;
+  return <Tag color={COLOURS[status]}>{STATUS_LABELS[status]}</Tag>;
 }

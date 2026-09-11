@@ -164,6 +164,22 @@ export const TaskPageSchema = paginated(TaskSchema);
 export type TaskPage = z.infer<typeof TaskPageSchema>;
 
 /**
+ * How the list pages, as numbers rather than prose.
+ *
+ * Exported for the reason `TASK_LIMITS` is: the paginator offers page sizes and
+ * has to offer ones the API will accept. A size selector carrying its own copy
+ * of the cap would drift from the schema that actually rejects `?pageSize=250`,
+ * and the drift would show up as a `422` on a control the UI itself offered.
+ */
+export const TASK_PAGE = {
+  /** Where an unpaged list starts, and where a changed filter goes back to. */
+  first: 1,
+  defaultSize: 10,
+  /** No request may ask for the whole table in a single round trip. */
+  maxSize: 100,
+} as const;
+
+/**
  * The `GET /api/tasks` query string. `z.coerce` because a query string arrives
  * as text — `?page=2` is `"2"` until something says otherwise.
  *
@@ -171,9 +187,13 @@ export type TaskPage = z.infer<typeof TaskPageSchema>;
  * included. Archived is a Status, not a soft delete (CONTEXT.md, "Archived").
  */
 export const TaskListQuery = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  // Capped so one request cannot ask for the whole table in a single round trip.
-  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  page: z.coerce.number().int().min(TASK_PAGE.first).default(TASK_PAGE.first),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(TASK_PAGE.maxSize)
+    .default(TASK_PAGE.defaultSize),
   status: TaskStatus.optional(),
 });
 export type TaskListQuery = z.infer<typeof TaskListQuery>;

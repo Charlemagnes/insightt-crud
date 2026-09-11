@@ -30,7 +30,7 @@ npm run lint                   # fans out to each workspace; eslint flat config 
 npm run db:generate            # drizzle-kit — generate a migration from schema.ts
 npm run db:migrate             # apply migrations
 npm run db:seed -- '<user id>' # demo Tasks under one Owner; add 'replace' to clear theirs first
-npm run test                   # Jest: unit (apps/api, packages/shared) + integration (apps/web)
+npm run test                   # Jest, per workspace: apps/api, packages/shared, apps/web
 npm run test:e2e               # Cypress
 npm run docs:api               # z.toJSONSchema() -> docs/openapi.json
 ```
@@ -95,7 +95,7 @@ v16 APIs differ from older releases.
   `apps/api/src/tasks/mappers.ts` is the seam. Do not use `drizzle-zod` for the
   shared schemas.
 - **Nothing above `tasks/repository.ts` knows Drizzle exists.** The interface is
-  in that file; `repository.drizzle.ts` and `repository.memory.ts` implement it,
+  in that file; `repository.drizzle.ts` and `repository.fake.ts` implement it,
   and only `index.ts` and the test harness name one.
 - **Triggers and functions are hand-written migrations.** `drizzle-kit` diffs
   tables only, so `npm run db:generate -- --custom --name <what>` and write the

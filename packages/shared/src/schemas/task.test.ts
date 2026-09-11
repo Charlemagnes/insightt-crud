@@ -1,6 +1,9 @@
 import {
   CreateTaskInput,
   TASK_LIMITS,
+  TASK_PAGE,
+  TaskListQuery,
+  TaskPageSchema,
   TaskSchema,
   UpdateTaskInput,
 } from "./task";
@@ -256,5 +259,127 @@ describe("TaskSchema", () => {
     };
 
     expect(() => TaskSchema.parse(created)).not.toThrow();
+  });
+});
+
+describe("TaskListQuery", () => {
+  describe("defaults", () => {
+    it("reads an absent query string as the first page", () => {
+      expect(TaskListQuery.parse({})).toEqual({
+        page: TASK_PAGE.first,
+        pageSize: TASK_PAGE.defaultSize,
+      });
+    });
+
+    it("leaves the Status unset, so the list shows every Status", () => {
+      expect(TaskListQuery.parse({}).status).toBeUndefined();
+    });
+
+    it("has no Status default to accidentally hide Archived Tasks", () => {
+      expect(TaskListQuery.parse({})).not.toHaveProperty("status");
+    });
+  });
+
+  describe("coercion", () => {
+    it("reads the numbers a query string spells as text", () => {
+      expect(TaskListQuery.parse({ page: "3", pageSize: "25" })).toEqual({
+        page: 3,
+        pageSize: 25,
+      });
+    });
+
+    it("rejects a page that is not a number at all", () => {
+      expect(TaskListQuery.safeParse({ page: "later" }).success).toBe(false);
+    });
+
+    it("rejects a fractional page", () => {
+      expect(TaskListQuery.safeParse({ page: "1.5" }).success).toBe(false);
+    });
+  });
+
+  describe("bounds", () => {
+    it("rejects a page before the first", () => {
+      expect(
+        TaskListQuery.safeParse({ page: TASK_PAGE.first - 1 }).success,
+      ).toBe(false);
+    });
+
+    it("accepts a page size at the cap", () => {
+      expect(TaskListQuery.parse({ pageSize: TASK_PAGE.maxSize }).pageSize).toBe(
+        TASK_PAGE.maxSize,
+      );
+    });
+
+    it("rejects a page size beyond the cap rather than clamping it", () => {
+      expect(
+        TaskListQuery.safeParse({ pageSize: TASK_PAGE.maxSize + 1 }).success,
+      ).toBe(false);
+    });
+
+    it("rejects a page size of nothing", () => {
+      expect(TaskListQuery.safeParse({ pageSize: 0 }).success).toBe(false);
+    });
+  });
+
+  describe("the Status filter", () => {
+    it("accepts a Status in the lifecycle", () => {
+      expect(TaskListQuery.parse({ status: "DONE" }).status).toBe("DONE");
+    });
+
+    it("accepts ARCHIVED, which is a Status and not a soft delete", () => {
+      expect(TaskListQuery.parse({ status: "ARCHIVED" }).status).toBe(
+        "ARCHIVED",
+      );
+    });
+
+    it("rejects a Status outside the lifecycle", () => {
+      expect(TaskListQuery.safeParse({ status: "BLOCKED" }).success).toBe(false);
+    });
+
+    it("rejects a Status in the wrong case, rather than guessing", () => {
+      expect(TaskListQuery.safeParse({ status: "done" }).success).toBe(false);
+    });
+  });
+
+  describe("TASK_PAGE", () => {
+    // The paginator offers these sizes; the schema is what rejects one the API
+    // will not serve. These hold the two together.
+    it("says where the page-size rule actually rejects", () => {
+      expect(TaskListQuery.safeParse({ pageSize: TASK_PAGE.maxSize }).success).toBe(
+        true,
+      );
+      expect(
+        TaskListQuery.safeParse({ pageSize: TASK_PAGE.maxSize + 1 }).success,
+      ).toBe(false);
+    });
+
+    it("names a default the schema would accept if it were sent explicitly", () => {
+      expect(
+        TaskListQuery.safeParse({ pageSize: TASK_PAGE.defaultSize }).success,
+      ).toBe(true);
+    });
+  });
+});
+
+describe("TaskPageSchema", () => {
+  const page = {
+    items: [],
+    page: TASK_PAGE.first,
+    pageSize: TASK_PAGE.defaultSize,
+    total: 0,
+  };
+
+  it("describes an empty page, which still carries the total", () => {
+    expect(TaskPageSchema.parse(page)).toEqual(page);
+  });
+
+  it("requires the total, which is what the pager sizes itself from", () => {
+    const { total: _total, ...withoutTotal } = page;
+
+    expect(TaskPageSchema.safeParse(withoutTotal).success).toBe(false);
+  });
+
+  it("rejects a negative total", () => {
+    expect(TaskPageSchema.safeParse({ ...page, total: -1 }).success).toBe(false);
   });
 });

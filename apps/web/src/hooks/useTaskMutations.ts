@@ -10,7 +10,11 @@ import {
   updateTask,
   type MarkDoneResponse,
 } from "@/api/tasks";
-import { tasksQueryKey } from "@/hooks/useTasks";
+import {
+  taskPageQueryKey,
+  tasksQueryKey,
+  useTaskListParams,
+} from "@/hooks/useTasks";
 
 /**
  * Creating a Task. **Deliberately not optimistic** (PLAN.md §12): under
@@ -193,40 +197,51 @@ function useOptimisticPage<Variables, Result>({
   confirmed,
 }: OptimisticPageMutation<Variables, Result>) {
   const queryClient = useQueryClient();
+  // The page on screen, which is the only one an optimistic write may touch:
+  // whether the Task also belongs on page 3 of the Archived filter is a
+  // question about ordering and counts that only the server can answer, and
+  // `onSettled` asks it by invalidating every page.
+  const pageKey = taskPageQueryKey(useTaskListParams());
 
   return useMutation({
     mutationFn: run,
 
     onMutate: async (variables: Variables) => {
-      await queryClient.cancelQueries({ queryKey: tasksQueryKey });
+      await queryClient.cancelQueries({ queryKey: pageKey });
 
-      const snapshot = queryClient.getQueryData<TaskPage>(tasksQueryKey);
+      const snapshot = queryClient.getQueryData<TaskPage>(pageKey);
 
-      queryClient.setQueryData<TaskPage>(tasksQueryKey, (page) =>
+      queryClient.setQueryData<TaskPage>(pageKey, (page) =>
         page ? inFlight(page, variables) : page,
       );
 
-      return { snapshot };
+      return { snapshot, pageKey };
     },
 
-    onError: (_error, _variables, context) => {
-      // Put back exactly what was there. The mutation rejected, so the row the
-      // person is looking at has to come back — for a delete, literally.
-      if (context?.snapshot) {
-        queryClient.setQueryData(tasksQueryKey, context.snapshot);
+    // The third argument is what `onMutate` returned, not TanStack's own
+    // context — which is the fourth, and is not what either of these wants. It
+    // is optional here only because `onMutate` may not have run at all.
+    onError: (_error, _variables, recorded) => {
+      // Put back exactly what was there, on the page it was taken from — the
+      // filter may have moved on since, and writing the snapshot to whatever is
+      // on screen now would restore a row onto a page it was never part of.
+      if (recorded?.snapshot) {
+        queryClient.setQueryData(recorded.pageKey, recorded.snapshot);
       }
     },
 
-    onSuccess: (result) => {
+    onSuccess: (result, _variables, recorded) => {
       if (!confirmed) return;
 
-      queryClient.setQueryData<TaskPage>(tasksQueryKey, (page) =>
+      // The same page `onMutate` wrote to, for the same reason.
+      queryClient.setQueryData<TaskPage>(recorded.pageKey, (page) =>
         page ? confirmed(page, result) : page,
       );
     },
 
-    // `total` and the ordering are the server's to decide, and a Transition can
-    // move a Task out of a filtered list entirely.
+    // Every page, not just the one on screen: `total` and the ordering are the
+    // server's to decide, and a Transition can move a Task out of a filtered
+    // list entirely — including one cached under a filter this tab has left.
     onSettled: () => queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
   });
 }

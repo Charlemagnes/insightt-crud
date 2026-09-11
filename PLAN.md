@@ -65,7 +65,7 @@ apps/api/src/     index.ts  app.ts  env.ts
                   tasks/   routes  service  mappers
                            repository            (the interface)
                            repository.drizzle    (Postgres)
-                           repository.memory     (the test fake)
+                           repository.fake       (the test fake)
                   testing/harness.ts
                   types/express.d.ts
 
@@ -542,9 +542,12 @@ export const UpdateTaskInput = z.strictObject({
 }).refine(v => v.title !== undefined || v.description !== undefined,
           { message: 'An edit must change the title or the description' });
 
+export const TASK_PAGE = { first: 1, defaultSize: 10, maxSize: 100 } as const;
+
 export const TaskListQuery = z.object({
-  page:     z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  page:     z.coerce.number().int().min(TASK_PAGE.first).default(TASK_PAGE.first),
+  pageSize: z.coerce.number().int().min(1)
+              .max(TASK_PAGE.maxSize).default(TASK_PAGE.defaultSize),
   status:   TaskStatus.optional(),
 });
 
@@ -621,15 +624,32 @@ Two stores, kept off TanStack Query's territory.
 real win: the API client reads the token from the store instead of needing
 hooks, so the `fetch` wrapper stays a plain function.
 
-**`useTaskListStore`** — the list's *view* state: `page`, `pageSize`,
-`statusFilter`, `selectedTaskId`, `editingTaskId`.
+**`useTaskListStore`** — the list's *view* state: `page`, `pageSize`, `status`,
+and `formTarget`, the Task the form is open on.
+
+`formTarget` is one discriminated field — `{ mode: 'create' }`,
+`{ mode: 'edit', taskId }`, or `null` — rather than a selection and an editing
+flag, because creating and editing are the same modal being open and two fields
+could disagree about what it is open on. The edit target is an **id**; the row
+itself is looked up in the query cache, so the store never holds a Task.
 
 **The fetched task array stays in TanStack Query, not in Zustand.** Query
 already caches, invalidates and deduplicates it; duplicating it into a store
 means two caches to reconcile on every mutation, and the replay-`200` path gets
 materially harder. Instead the Zustand params *are* the query key —
-`['tasks', { page, pageSize, statusFilter }]` — so changing a filter refetches
-automatically. Zustand owns "what the user is looking at"; Query owns the rows.
+`['tasks', { page, pageSize, status }]` — so changing a filter refetches
+automatically, with no effect watching the filter to ask for one: a different
+filter is simply a key with nothing cached under it. Zustand owns "what the user
+is looking at"; Query owns the rows.
+
+Changing the filter resets `page` to 1. The page number counts into a result set
+the filter has just replaced, and keeping it lands the person past the end of
+the new one — which reads as a filter that matched nothing.
+
+`['tasks']` itself is never fetched; it is the prefix the pages hang off, and
+what every mutation invalidates. An optimistic write touches only the page on
+screen — whether a Task also belongs on a page cached under another filter is a
+question about counts and ordering that only the server can answer.
 
 **Mutation policy.**
 
@@ -678,6 +698,7 @@ every moment is specified rather than left to the component defaults:
 | List first load | `Table loading={isPending}` |
 | List page change | `placeholderData: keepPreviousData` — the table dims instead of emptying |
 | Zero tasks | `Empty` with a "Create your first task" CTA |
+| Zero tasks under a filter | `Empty` saying the Status has none, offering to clear the filter — the account is not empty, this Status is |
 | Fetch error | `Alert type="error"` with Retry wired to `refetch()` |
 | Mutation in flight | `loading` + `disabled` on the submitting button; `Popconfirm okButtonProps={{ loading }}` |
 | Mutation outcome | `message.success` / `message.error` |
@@ -722,7 +743,8 @@ Testing Library" is not achievable, since RTL renders DOM components and cannot
 exercise Express or Node code. Split accordingly, and the README says so, since
 that is the reviewer's most likely objection.
 
-**1. Unit — Jest, no RTL** (`packages/shared` + `apps/api`)
+**1. Unit — Jest, no RTL** (`packages/shared`, `apps/api`, and the non-rendering
+parts of `apps/web`)
 The transition validator and the `markAsDone` service against a mocked
 repository: every legal transition, every rejected transition, the already-DONE
 idempotent path, the non-owner path, and the per-status field whitelist. Plus a
@@ -730,6 +752,13 @@ drift test asserting the shared machine permits exactly the transition
 `mark_task_done`'s SQL hardcodes — the rule is deliberately written in two
 languages (TypeScript for the pre-check and the UI, SQL for atomic enforcement),
 so a test has to hold them together.
+
+`apps/web` is the integration tier but not only that: the list's view state and
+the query string it becomes are plain modules, and testing them through a
+rendered table and a mock server would be three layers of machinery to assert
+that changing a filter resets the page. They live beside the code they test —
+`stores/taskList.test.ts` and `api/tasks.test.ts` — and run in the same Jest
+project.
 
 **2. Integration — Jest + React Testing Library + MSW** (`apps/web`)
 The task list component. MSW mocks `GET /api/tasks` and
@@ -746,7 +775,9 @@ boots already authenticated with no cross-origin redirect. The spec stays
 **read-only** — log in, assert the list renders — so there is no teardown.
 `cy.origin()` is the fallback if the Password grant cannot be enabled.
 
-Config: `next/jest` in `apps/web`, `ts-jest` (CJS preset) in `apps/api`, and
+Config: `next/jest` in `apps/web` (jsdom, with `jest.setup.ts` supplying the
+`NEXT_PUBLIC_*` values `config.ts` reads at import time, so the suite needs no
+real tenant), `ts-jest` (CJS preset) in `apps/api`, and
 `ts-jest` in `packages/shared` with `module: commonjs` overridden for the test
 run only — the package's own `tsconfig.json` targets the bundlers that consume
 it, which means ESM, and ts-jest on ESM is the tarpit §2 avoids in `apps/api`.
