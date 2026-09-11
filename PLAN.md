@@ -299,10 +299,14 @@ PENDING → IN_PROGRESS → DONE → ARCHIVED
 ```
 
 No skipping steps, no reverts, `ARCHIVED` is terminal. Every other transition
-is rejected with `409 INVALID_TRANSITION`. The machine and its
-`canTransition()` / `canEdit(task, field)` helpers live in
+is rejected with `409 INVALID_TRANSITION`. The machine lives in
 `packages/shared/src/rules/transitions.ts` so the frontend can disable
-impossible actions using the same rules the API enforces.
+impossible actions using the same rules the API enforces. Because it is
+strictly linear it is written as the lifecycle in order —
+`TaskStatus.options`, not a second list — and the predicates read off that:
+`canTransition(from, to)`, `nextStatus(status)`, `statusBefore(status)` (the
+status a guarded `UPDATE` has to require), and `canEdit(status, field)` /
+`canEditAnything(status)` for the whitelist below.
 
 **Only the owner can mark a task DONE.** Satisfied structurally — tasks are
 owner-scoped end to end, so a non-owner cannot address the task at all.
@@ -338,11 +342,15 @@ update tasks
 ```
 
 **Idempotency.** Zero rows affected means the caller needs to know *why*, and
-that read must happen in the same transaction as the update — otherwise another
-request can move the task in between, and a task that was `PENDING` at the
-update (correctly `409`) reads back as `DONE` and is misreported as a replay.
-So the branch logic lives inside the Postgres function, which returns a
-discriminated outcome:
+that read belongs in the same transaction as the update — outside it, the
+window another request can move the task through is a whole network round
+trip, and a task that was `PENDING` at the update (correctly `409`) reads back
+as `DONE` and is reported as a replay. `FOR UPDATE` on the re-read closes what
+is left of that window that can be closed: a completion already in flight is
+waited for rather than raced past. Under `READ COMMITTED` a completion that
+committed just before the re-read is still reported as a replay, which is what
+the task now is. So the branch logic lives inside the Postgres function, which
+returns a discriminated outcome:
 
 | Outcome | HTTP |
 |---|---|

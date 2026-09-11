@@ -1,13 +1,15 @@
-import type { Task } from "@insightt/shared";
+import { canTransition, type Task } from "@insightt/shared";
 
 import { randomUUID } from "node:crypto";
 
 import type {
+  MarkDoneResult,
   OwnerScopedListQuery,
   OwnerScopedTaskDraft,
   OwnerScopedTaskQuery,
   TaskListResult,
   TaskRepository,
+  TransitionResult,
 } from "@/tasks/repository";
 
 /** A Task as it is stored: the wire shape, plus the Owner the wire never sees. */
@@ -75,10 +77,9 @@ export function createMemoryTaskRepository(
       };
     },
 
-    async findById({ userId, id }: OwnerScopedTaskQuery): Promise<Task | null> {
-      const found = tasks.find(
-        (task) => task.id === id && task.ownerId === userId,
-      );
+    async findById(query: OwnerScopedTaskQuery): Promise<Task | null> {
+      const found = owned(tasks, query);
+
       return found ? withoutOwner(found) : null;
     },
 
@@ -107,5 +108,58 @@ export function createMemoryTaskRepository(
 
       return withoutOwner(created);
     },
+
+    async start(query: OwnerScopedTaskQuery): Promise<TransitionResult> {
+      const task = owned(tasks, query);
+
+      if (!task) return { outcome: "not_found" };
+      // The same rule the SQL guard is built from, asked the other way round:
+      // there is a Task in hand here, so the question is whether it may move.
+      if (!canTransition(task.status, "IN_PROGRESS")) {
+        return { outcome: "wrong_status", task: withoutOwner(task) };
+      }
+
+      task.status = "IN_PROGRESS";
+      task.version += 1;
+      task.updatedAt = new Date().toISOString();
+
+      return { outcome: "changed", task: withoutOwner(task) };
+    },
+
+    async markDone(query: OwnerScopedTaskQuery): Promise<MarkDoneResult> {
+      const task = owned(tasks, query);
+
+      if (!task) return { outcome: "not_found" };
+
+      // Already DONE is a Replay: a success, and the original completion time
+      // survives it. This is the branch `mark_task_done()` reaches by reading
+      // the row inside the transaction that failed to update it.
+      if (task.status === "DONE") {
+        return { outcome: "replayed", task: withoutOwner(task) };
+      }
+
+      if (!canTransition(task.status, "DONE")) {
+        return { outcome: "wrong_status", task: withoutOwner(task) };
+      }
+
+      task.status = "DONE";
+      task.version += 1;
+      task.completedAt = new Date().toISOString();
+      task.updatedAt = task.completedAt;
+
+      return { outcome: "completed", task: withoutOwner(task) };
+    },
   };
+}
+
+/**
+ * The stored Task itself, not a copy — the transitions above mutate what they
+ * find. Owner-scoped like every other read, so a Task belonging to someone
+ * else is simply absent.
+ */
+function owned(
+  tasks: OwnedTask[],
+  { userId, id }: OwnerScopedTaskQuery,
+): OwnedTask | undefined {
+  return tasks.find((task) => task.id === id && task.ownerId === userId);
 }

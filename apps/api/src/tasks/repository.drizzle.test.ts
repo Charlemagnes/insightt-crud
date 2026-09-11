@@ -33,6 +33,35 @@ function aListRow(total: number): unknown[] {
 }
 
 /**
+ * One row as `mark_task_done()` returns it: keyed by column name rather than
+ * positional, because `db.execute` runs a raw statement with no Drizzle field
+ * list to map, and snake_case because those are the table's own column names.
+ *
+ * The timestamps are Postgres's own text form rather than `Date` objects, for
+ * the same reason — Drizzle replaces `node-postgres`'s timestamp parser with
+ * one that hands the text straight through, and a raw statement has no column
+ * mapper to turn it back.
+ */
+function aFunctionRow(
+  outcome: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    outcome,
+    id: "11111111-1111-4111-8111-111111111111",
+    owner_id: "auth0|owner",
+    title: "A Task",
+    description: null,
+    status: "DONE",
+    version: 2,
+    created_at: "2026-01-01 00:00:00+00",
+    updated_at: "2026-02-01 00:00:00+00",
+    completed_at: "2026-02-01 00:00:00+00",
+    ...overrides,
+  };
+}
+
+/**
  * Drizzle over a client that records the statement instead of sending it. There
  * is no Postgres here — what is under test is the SQL the repository builds,
  * not what Postgres does with it.
@@ -43,7 +72,7 @@ function aListRow(total: number): unknown[] {
  * missing `owner_id` predicate would pass every one of those tests while
  * leaking every Task in the table.
  */
-function recordingRepository(rows: unknown[][] = []) {
+function recordingRepository(rows: unknown[] = []) {
   const statements: Statement[] = [];
 
   const client = {
@@ -277,6 +306,173 @@ describe("createDrizzleTaskRepository", () => {
       // Not reachable through Postgres, and not worth handing every caller a
       // `Task | undefined` to answer for.
       await expect(repository.create(draft)).rejects.toThrow();
+    });
+  });
+
+  describe("start", () => {
+    const query = {
+      userId: "auth0|owner",
+      id: "11111111-1111-4111-8111-111111111111",
+    };
+
+    it("updates under a guard on the id, the Owner and the current Status", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.start(query);
+
+      const [updated] = statements;
+      expect(normalise(updated.text)).toContain('update "tasks"');
+      // All three in one statement, so the Transition is atomic: another
+      // request moving the Task first simply stops this one matching.
+      expect(normalise(updated.text)).toContain(
+        '("tasks"."id" = $2 and "tasks"."owner_id" = $3 and "tasks"."status" = $4)',
+      );
+      expect(updated.values).toEqual([
+        "IN_PROGRESS",
+        query.id,
+        query.userId,
+        "PENDING",
+      ]);
+    });
+
+    it("guards on the Status the shared machine names, not a spelled one", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.start(query);
+
+      // `statusBefore('IN_PROGRESS')`. Written here instead, it could disagree
+      // with the rule the UI disables its buttons by.
+      expect(statements[0].values).toContain("PENDING");
+    });
+
+    it("raises the Version so a held ETag stops matching", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      await repository.start(query);
+
+      expect(normalise(statements[0].text)).toContain(
+        '"version" = "tasks"."version" + 1',
+      );
+    });
+
+    it("reads nothing more when the update changed a row", async () => {
+      const { repository, statements } = recordingRepository([aTaskRow()]);
+
+      const result = await repository.start(query);
+
+      expect(result).toMatchObject({ outcome: "changed" });
+      expect(statements).toHaveLength(1);
+    });
+
+    it("asks why when it changed none", async () => {
+      // The update matches nothing, and the follow-up read finds the Task.
+      const { repository, statements } = recordingRepository([]);
+
+      const result = await repository.start(query);
+
+      expect(statements).toHaveLength(2);
+      expect(normalise(statements[1].text)).toContain('select');
+      // Owner-scoped like every other read.
+      expect(statements[1].values).toEqual([query.id, query.userId, 1]);
+      expect(result).toEqual({ outcome: "not_found" });
+    });
+  });
+
+  describe("markDone", () => {
+    const query = {
+      userId: "auth0|owner",
+      id: "11111111-1111-4111-8111-111111111111",
+    };
+
+    it("delegates the whole decision to the Postgres function", async () => {
+      const { repository, statements } = recordingRepository([
+        aFunctionRow("completed"),
+      ]);
+
+      await repository.markDone(query);
+
+      // One statement, because the conditional UPDATE and the read that
+      // explains a zero-row result have to share a transaction (ADR-0002).
+      expect(statements).toHaveLength(1);
+      expect(normalise(statements[0].text)).toBe(
+        "select * from mark_task_done($1, $2)",
+      );
+    });
+
+    it("binds the Task id and the Actor rather than splicing them", async () => {
+      const { repository, statements } = recordingRepository([
+        aFunctionRow("completed"),
+      ]);
+
+      await repository.markDone(query);
+
+      expect(statements[0].values).toEqual([query.id, query.userId]);
+      expect(statements[0].text).not.toContain("auth0|owner");
+    });
+
+    it.each(["completed", "replayed", "wrong_status"] as const)(
+      "carries the Task back with a %s outcome",
+      async (outcome) => {
+        const { repository } = recordingRepository([aFunctionRow(outcome)]);
+
+        const result = await repository.markDone(query);
+
+        expect(result).toEqual({
+          outcome,
+          task: {
+            id: "11111111-1111-4111-8111-111111111111",
+            title: "A Task",
+            description: null,
+            status: "DONE",
+            version: 2,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-02-01T00:00:00.000Z",
+            completedAt: "2026-02-01T00:00:00.000Z",
+          },
+        });
+      },
+    );
+
+    it("never publishes the Owner the function returns", async () => {
+      const { repository } = recordingRepository([aFunctionRow("completed")]);
+
+      const result = await repository.markDone(query);
+
+      // The function selects the whole row; the wire shape has no Owner on it.
+      expect(result).not.toHaveProperty("task.ownerId");
+      expect(result).not.toHaveProperty("task.owner_id");
+    });
+
+    it("reports not_found without a Task", async () => {
+      // The function returns its columns as NULL when there is no row to
+      // report, which is exactly the case the union has no Task for.
+      const nulls = Object.fromEntries(
+        Object.keys(aFunctionRow("x")).map((column) => [column, null]),
+      );
+      const { repository } = recordingRepository([
+        { ...nulls, outcome: "not_found" },
+      ]);
+
+      await expect(repository.markDone(query)).resolves.toEqual({
+        outcome: "not_found",
+      });
+    });
+
+    it("refuses an outcome the function is not documented to return", async () => {
+      const { repository } = recordingRepository([aFunctionRow("finished")]);
+
+      // Parsed, not cast. Rename an outcome in the migration and every Mark
+      // Done fails loudly here rather than falling through to a branch that
+      // happens to be last.
+      await expect(repository.markDone(query)).rejects.toThrow();
+    });
+
+    it("refuses a completed outcome that came back without a Task", async () => {
+      const { repository } = recordingRepository([
+        { outcome: "completed", id: null },
+      ]);
+
+      await expect(repository.markDone(query)).rejects.toThrow();
     });
   });
 });

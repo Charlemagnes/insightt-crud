@@ -10,5 +10,6 @@
  * particular, does not: `AuthUser` lives in `apps/web` and `Actor` in
  * `apps/api`, because the API never returns a user — it only reads the token.
  */
+export * from "./rules/transitions";
 export * from "./schemas/errors";
 export * from "./schemas/task";

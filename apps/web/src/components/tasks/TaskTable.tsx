@@ -1,10 +1,12 @@
 "use client";
 
 import type { Task } from "@insightt/shared";
-import { Table, Tag, Typography, type TableProps } from "antd";
+import { Table, Typography, type TableProps } from "antd";
 import type { ReactNode } from "react";
 
 import { EmptyState } from "@/components/shared/EmptyState";
+import { TaskActions } from "@/components/tasks/TaskActions";
+import { TaskStatusTag } from "@/components/tasks/TaskStatusTag";
 
 const { Text } = Typography;
 
@@ -20,9 +22,7 @@ const columns: NonNullable<TableProps<Task>["columns"]> = [
     dataIndex: "status",
     key: "status",
     width: 160,
-    // A plain Tag until `TaskStatusTag` arrives with the transition tickets and
-    // gives each Status its colour and its label.
-    render: (status: Task["status"]) => <Tag>{status.replaceAll("_", " ")}</Tag>,
+    render: (status: Task["status"]) => <TaskStatusTag status={status} />,
   },
   {
     title: "Created",
@@ -30,6 +30,14 @@ const columns: NonNullable<TableProps<Task>["columns"]> = [
     key: "createdAt",
     width: 200,
     render: (createdAt: string) => new Date(createdAt).toLocaleString(),
+  },
+  {
+    title: "Actions",
+    key: "actions",
+    width: 200,
+    // The whole Task, not one field: which Transitions a row offers is a
+    // question about its Status, and the mutations address it by id.
+    render: (_: unknown, task: Task) => <TaskActions task={task} />,
   },
 ];
 

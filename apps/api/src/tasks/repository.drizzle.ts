@@ -1,16 +1,40 @@
-import type { Task } from "@insightt/shared";
+import { statusBefore, TaskStatus, type Task } from "@insightt/shared";
 import { and, count, desc, eq, sql, type SQL } from "drizzle-orm";
+import { z } from "zod";
 
 import type { Database } from "@/db/client";
-import { tasks } from "@/db/schema";
+import { tasks, type TaskRow } from "@/db/schema";
 import { toTask } from "@/tasks/mappers";
 import type {
+  MarkDoneResult,
   OwnerScopedListQuery,
   OwnerScopedTaskDraft,
   OwnerScopedTaskQuery,
   TaskListResult,
   TaskRepository,
+  TransitionResult,
 } from "@/tasks/repository";
+
+/**
+ * The Status a Task must be in to be started, read off the shared machine
+ * rather than written here. The SQL guard and the button the UI enables then
+ * come from one definition, so neither can offer what the other refuses.
+ *
+ * `statusBefore` answers `null` for the Status every Task starts in, which
+ * `IN_PROGRESS` is not. Resolving it once at load means a mistake here is a
+ * crash on boot rather than a Transition that quietly never matches.
+ */
+const STARTS_FROM = requireStatusBefore("IN_PROGRESS");
+
+function requireStatusBefore(to: TaskStatus): TaskStatus {
+  const from = statusBefore(to);
+
+  if (!from) {
+    throw new Error(`Nothing transitions into ${to}; it is where a Task starts`);
+  }
+
+  return from;
+}
 
 /**
  * The Postgres-backed repository — the only module in `apps/api` that issues
@@ -54,15 +78,8 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
       };
     },
 
-    async findById({ userId, id }: OwnerScopedTaskQuery): Promise<Task | null> {
-      const [row] = await db
-        .select()
-        .from(tasks)
-        // Owner and id in one predicate: a Task belonging to someone else does
-        // not match, so it comes back missing rather than forbidden, and the
-        // Actor learns nothing about whether it exists.
-        .where(and(eq(tasks.id, id), eq(tasks.ownerId, userId)))
-        .limit(1);
+    async findById(query: OwnerScopedTaskQuery): Promise<Task | null> {
+      const row = await selectOwned(db, query);
 
       return row ? toTask(row) : null;
     },
@@ -90,6 +107,157 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
 
       return toTask(row);
     },
+
+    async start(query: OwnerScopedTaskQuery): Promise<TransitionResult> {
+      const { userId, id } = query;
+
+      // One guarded statement, so the Transition is atomic without a lock the
+      // application holds: two callers racing to start the same Task both run
+      // this, and only one of them matches a row.
+      const [row] = await db
+        .update(tasks)
+        .set({ status: "IN_PROGRESS", version: sql`${tasks.version} + 1` })
+        .where(
+          and(
+            eq(tasks.id, id),
+            eq(tasks.ownerId, userId),
+            eq(tasks.status, STARTS_FROM),
+          ),
+        )
+        .returning();
+
+      if (row) {
+        return { outcome: "changed", task: toTask(row) };
+      }
+
+      // Nothing matched, and the caller needs to know whether that is a `404`
+      // or a `409`. This read is a second statement, so a Task changing in
+      // between could swap one refusal for the other — which is a refusal
+      // either way, and the Transition still did not happen. Mark Done cannot
+      // accept that much, because there the two answers are a success and a
+      // rejection; that is why it is a function and this is not (PLAN.md §8).
+      const current = await selectOwned(db, query);
+
+      return current
+        ? { outcome: "wrong_status", task: toTask(current) }
+        : { outcome: "not_found" };
+    },
+
+    async markDone({ userId, id }: OwnerScopedTaskQuery): Promise<MarkDoneResult> {
+      // The whole decision happens in the function, in one transaction: the
+      // conditional UPDATE, and the read that explains a zero-row result. See
+      // `drizzle/0002_mark_task_done.sql` and ADR-0002.
+      const result = await db.execute(
+        sql`select * from mark_task_done(${id}, ${userId})`,
+      );
+
+      // `db.execute` returns whatever Postgres sent, typed as loosely as that
+      // implies, so the contract is re-established here rather than asserted.
+      const row = MarkTaskDoneRow.parse(result.rows[0]);
+
+
+      return row.outcome === "not_found"
+        ? { outcome: "not_found" }
+        : { outcome: row.outcome, task: toTask(asTaskRow(row)) };
+    },
+  };
+}
+
+/**
+ * One Task, by id and Owner together. A Task belonging to someone else does
+ * not match, so it comes back missing rather than forbidden, and the Actor
+ * learns nothing about whether it exists.
+ */
+async function selectOwned(
+  db: Database,
+  { userId, id }: OwnerScopedTaskQuery,
+): Promise<TaskRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.id, id), eq(tasks.ownerId, userId)))
+    .limit(1);
+
+  return row;
+}
+
+/**
+ * A `timestamptz` as it arrives from a raw statement.
+ *
+ * Drizzle replaces `node-postgres`'s own parser for the timestamp types with
+ * one that hands back Postgres's text form, so it can do the conversion in its
+ * column mappers instead. A `db.execute` has no column mapper, so the text
+ * arrives here — and `new Date(...)` on it is exactly what Drizzle's own
+ * mapper would have done with it.
+ */
+const timestamp = z.coerce.date();
+
+/**
+ * The `tasks` columns as `mark_task_done()` returns them: the table's own
+ * snake_case names, because a raw `db.execute` has no Drizzle select to rename
+ * them and no typed row to hand back.
+ */
+const TaskColumns = z.object({
+  id: z.uuid(),
+  owner_id: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  status: TaskStatus,
+  version: z.number().int(),
+  created_at: timestamp,
+  updated_at: timestamp,
+  // `nullable` outside the coercion, so an absent completion stays absent
+  // rather than being coerced into the epoch.
+  completed_at: timestamp.nullable(),
+});
+
+/**
+ * The names `mark_task_done()` reports its outcomes under, written once here.
+ * The migration spells them again in SQL, and `db/mark-task-done.test.ts`
+ * reads this list to hold the two together. TypeScript holds the third
+ * spelling — `MarkDoneResult` — to it, because `markDone` below returns one
+ * and is built from the other.
+ */
+export const MarkDoneOutcome = z.enum([
+  "completed",
+  "replayed",
+  "wrong_status",
+  "not_found",
+]);
+
+/**
+ * The function's row, as a schema. Parsing rather than casting is what makes
+ * the SQL and this file one contract: rename an outcome in the migration and
+ * every Mark Done fails loudly here, instead of falling through to whichever
+ * branch happens to be last.
+ *
+ * Only `not_found` comes back without a Task, and the union says so, so
+ * nothing downstream has to check for a Task the outcome already promised.
+ */
+const MarkTaskDoneRow = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("not_found") }),
+  z.object({
+    outcome: MarkDoneOutcome.exclude(["not_found"]),
+    ...TaskColumns.shape,
+  }),
+]);
+
+/**
+ * The same columns under the names Drizzle's own rows use. This crosses no
+ * layer — both spellings are the database's — it only puts the row into the
+ * shape `mappers.ts` takes, which stays the single seam to the wire contract.
+ */
+function asTaskRow(columns: z.infer<typeof TaskColumns>): TaskRow {
+  return {
+    id: columns.id,
+    ownerId: columns.owner_id,
+    title: columns.title,
+    description: columns.description,
+    status: columns.status,
+    version: columns.version,
+    createdAt: columns.created_at,
+    updatedAt: columns.updated_at,
+    completedAt: columns.completed_at,
   };
 }
 

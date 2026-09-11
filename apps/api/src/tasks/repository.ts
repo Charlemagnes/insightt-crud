@@ -47,6 +47,34 @@ export interface TaskListResult {
 }
 
 /**
+ * Why a Transition did not happen. The distinction this preserves is the one
+ * the routes report as `409` against `404`: a repository that answered
+ * `Task | null` would have thrown it away before anything could.
+ *
+ * `not_found` carries no Task, because a Task the Actor does not own and a
+ * Task that does not exist are the same answer and neither has one to give.
+ */
+export type Refused =
+  | { outcome: "wrong_status"; task: Task }
+  | { outcome: "not_found" };
+
+/** What a guarded Transition did. */
+export type TransitionResult = { outcome: "changed"; task: Task } | Refused;
+
+/**
+ * What marking a Task Done did: the same refusals, and two ways to succeed.
+ *
+ * `replayed` is deliberately not folded into `completed`. The Task was already
+ * `DONE`, nothing was written, and that is a success (CONTEXT.md, "Replay") —
+ * but it is the one the route marks with a header, and collapsing the two here
+ * would leave the API unable to say which request finished the work.
+ */
+export type MarkDoneResult =
+  | { outcome: "completed"; task: Task }
+  | { outcome: "replayed"; task: Task }
+  | Refused;
+
+/**
  * The Task repository. `apps/api` never imports a concrete implementation above
  * this line, so nothing that reads Tasks knows Drizzle exists — which is what
  * lets the whole HTTP test suite run against `createMemoryTaskRepository`.
@@ -79,4 +107,22 @@ export interface TaskRepository {
    * can produce a Task that starts anywhere else.
    */
   create(draft: OwnerScopedTaskDraft): Promise<Task>;
+
+  /**
+   * Moves a `PENDING` Task to `IN_PROGRESS`, through one guarded statement.
+   *
+   * The Status it may be moved from is not a parameter: it is the Status the
+   * shared machine names as the one before `IN_PROGRESS`, so a caller cannot
+   * ask for a Transition the rules do not allow.
+   */
+  start(query: OwnerScopedTaskQuery): Promise<TransitionResult>;
+
+  /**
+   * Marks a Task `DONE`, atomically and idempotently.
+   *
+   * Calling it twice is not an error and does not complete the Task twice: the
+   * second call comes back `replayed`, with the original completion time
+   * intact. Two callers racing get one completion and two identical successes.
+   */
+  markDone(query: OwnerScopedTaskQuery): Promise<MarkDoneResult>;
 }

@@ -4,6 +4,7 @@ import {
   TaskListQuery,
   type Task,
   type TaskPage,
+  type TaskStatus,
 } from "@insightt/shared";
 import type { Response } from "express";
 import { Router } from "express";
@@ -11,7 +12,7 @@ import { Router } from "express";
 import { actorOf } from "@/middleware/auth";
 import { ApiError } from "@/middleware/errors";
 import { validate } from "@/middleware/validate";
-import type { TaskRepository } from "@/tasks/repository";
+import type { Refused, TaskRepository } from "@/tasks/repository";
 
 const listValidator = validate({ query: TaskListQuery });
 const taskIdValidator = validate({ params: TaskIdParam });
@@ -76,7 +77,62 @@ export function createTaskRoutes(repository: TaskRepository): Router {
     sendTask(res, created);
   });
 
+  // No request body on either Transition endpoint: the target Status is in the
+  // path, so there is nothing to validate and nothing a client can contradict.
+  router.post("/:id/start", taskIdValidator, async (req, res) => {
+    const result = await repository.start({
+      userId: actorOf(req).userId,
+      id: taskIdValidator.read(req).params.id,
+    });
+
+    if (result.outcome !== "changed") {
+      throw refusalOf(result, "IN_PROGRESS");
+    }
+
+    sendTask(res, result.task);
+  });
+
+  router.post("/:id/done", taskIdValidator, async (req, res) => {
+    const result = await repository.markDone({
+      userId: actorOf(req).userId,
+      id: taskIdValidator.read(req).params.id,
+    });
+
+    if (result.outcome === "not_found" || result.outcome === "wrong_status") {
+      throw refusalOf(result, "DONE");
+    }
+
+    // A Replay is a success — the Task is Done, which is what was asked for.
+    // The header is how a client tells a Replay from the request that did the
+    // work; CORS exposes it so the browser can read it (PLAN.md §10).
+    if (result.outcome === "replayed") {
+      res.setHeader("X-Idempotent-Replay", "true");
+    }
+
+    sendTask(res, result.task);
+  });
+
   return router;
+}
+
+/**
+ * The failure a refused Transition is reported as.
+ *
+ * The two are different failures and the frontend branches on them: `404`
+ * means there is no such Task for this Actor, `409` means the Task is real but
+ * is not somewhere the move is legal. Neither reveals anything about a Task
+ * someone else owns — `404` is also the answer for one that exists.
+ */
+function refusalOf(result: Refused, to: TaskStatus): ApiError {
+  if (result.outcome === "not_found") {
+    return new ApiError(404, "NOT_FOUND", "Task not found");
+  }
+
+  return new ApiError(
+    409,
+    "INVALID_TRANSITION",
+    `A ${result.task.status} Task cannot be moved to ${to}`,
+  );
 }
 
 /**

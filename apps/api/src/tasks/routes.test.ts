@@ -1,7 +1,10 @@
 import { TaskPageSchema, TaskSchema } from "@insightt/shared";
 import request from "supertest";
 
-import { createMemoryTaskRepository } from "@/tasks/repository.memory";
+import {
+  createMemoryTaskRepository,
+  type OwnedTask,
+} from "@/tasks/repository.memory";
 import {
   aTask,
   asWireTask,
@@ -492,6 +495,299 @@ describe("POST /api/tasks", () => {
       await request(app).post("/api/tasks").send({ title: "" });
 
       expect(create).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("POST /api/tasks/:id/start", () => {
+  it("moves a PENDING Task to IN_PROGRESS", async () => {
+    const task = aTask({ status: "PENDING", version: 1 });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).post(`/api/tasks/${task.id}/start`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: task.id,
+      status: "IN_PROGRESS",
+      // Raised, because the Task changed and the next `If-Match` must not
+      // still match the Version the caller was holding.
+      version: 2,
+      completedAt: null,
+    });
+  });
+
+  it("returns a response the shared schema accepts, with the new ETag", async () => {
+    const task = aTask({ version: 3 });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).post(`/api/tasks/${task.id}/start`);
+
+    expect(() => TaskSchema.parse(response.body)).not.toThrow();
+    expect(response.headers.etag).toBe('"4"');
+  });
+
+  it("takes no request body into account", async () => {
+    const task = aTask();
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app)
+      .post(`/api/tasks/${task.id}/start`)
+      .send({ status: "DONE" });
+
+    // The target Status is in the path. There is nothing to contradict.
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("IN_PROGRESS");
+  });
+
+  it("scopes the Transition to the Actor", async () => {
+    const start = jest.fn(async () => ({ outcome: "not_found" }) as const);
+    const { app } = harness({ taskRepository: { start } });
+
+    await request(app).post(`/api/tasks/${ABSENT_ID}/start`);
+
+    expect(start).toHaveBeenCalledWith({
+      userId: TEST_USER_ID,
+      id: ABSENT_ID,
+    });
+  });
+
+  describe("the moves it refuses", () => {
+    it.each(["IN_PROGRESS", "DONE", "ARCHIVED"] as const)(
+      "refuses to start a %s Task as INVALID_TRANSITION",
+      async (status) => {
+        const task = aTask({ status });
+        const { app } = harness({ tasks: [task] });
+
+        const response = await request(app).post(`/api/tasks/${task.id}/start`);
+
+        // 409, not 412: nothing about this is a stale read — the move itself
+        // is not one the lifecycle allows.
+        expect(response.status).toBe(409);
+        expect(response.body.error.code).toBe("INVALID_TRANSITION");
+      },
+    );
+
+    it("leaves the refused Task exactly as it was", async () => {
+      const task = aTask({ status: "DONE", version: 4 });
+      const { app } = harness({ tasks: [task] });
+
+      await request(app).post(`/api/tasks/${task.id}/start`);
+      const after = await request(app).get(`/api/tasks/${task.id}`);
+
+      expect(after.body).toEqual(asWireTask(task));
+    });
+
+    it("reports a Task owned by someone else as NOT_FOUND", async () => {
+      const theirs = aTask({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const response = await request(app).post(`/api/tasks/${theirs.id}/start`);
+
+      // 404 and not 409: a Task the Actor cannot see has no Status to refuse.
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe("NOT_FOUND");
+    });
+
+    it("answers identically for a Task that exists elsewhere and one that does not", async () => {
+      const theirs = aTask({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const [notOwned, absent] = await Promise.all([
+        request(app).post(`/api/tasks/${theirs.id}/start`),
+        request(app).post(`/api/tasks/${ABSENT_ID}/start`),
+      ]);
+
+      expect(notOwned.status).toBe(absent.status);
+      expect(notOwned.body).toEqual(absent.body);
+    });
+
+    it("reports a malformed id as NOT_FOUND without reaching the repository", async () => {
+      const start = jest.fn(async () => ({ outcome: "not_found" }) as const);
+      const { app } = harness({ taskRepository: { start } });
+
+      const response = await request(app).post(
+        `/api/tasks/${MALFORMED_ID}/start`,
+      );
+
+      expect(response.status).toBe(404);
+      expect(start).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("POST /api/tasks/:id/done", () => {
+  /** A Task in the one Status that can be marked Done. */
+  const started = (overrides: Partial<OwnedTask> = {}) =>
+    aTask({ status: "IN_PROGRESS", ...overrides });
+
+  it("marks an IN_PROGRESS Task DONE and records when", async () => {
+    const task = started({ version: 1 });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).post(`/api/tasks/${task.id}/done`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: task.id,
+      status: "DONE",
+      version: 2,
+    });
+    expect(response.body.completedAt).not.toBeNull();
+  });
+
+  it("returns a response the shared schema accepts, with the new ETag", async () => {
+    const task = started({ version: 2 });
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).post(`/api/tasks/${task.id}/done`);
+
+    expect(() => TaskSchema.parse(response.body)).not.toThrow();
+    expect(response.headers.etag).toBe('"3"');
+  });
+
+  it("does not mark a fresh completion as a Replay", async () => {
+    const task = started();
+    const { app } = harness({ tasks: [task] });
+
+    const response = await request(app).post(`/api/tasks/${task.id}/done`);
+
+    expect(response.headers["x-idempotent-replay"]).toBeUndefined();
+  });
+
+  describe("a Replay", () => {
+    it("succeeds rather than failing", async () => {
+      const task = aTask({
+        status: "DONE",
+        completedAt: "2026-02-01T00:00:00.000Z",
+      });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await request(app).post(`/api/tasks/${task.id}/done`);
+
+      // The Task is Done, which is what was asked for. Reporting this as a
+      // failure would make a Replay look like a request that was lost.
+      expect(response.status).toBe(200);
+      expect(response.body.status).toBe("DONE");
+    });
+
+    it("carries the marker header", async () => {
+      const task = aTask({
+        status: "DONE",
+        completedAt: "2026-02-01T00:00:00.000Z",
+      });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await request(app).post(`/api/tasks/${task.id}/done`);
+
+      expect(response.headers["x-idempotent-replay"]).toBe("true");
+    });
+
+    it("never overwrites the original completion", async () => {
+      const task = aTask({
+        status: "DONE",
+        version: 5,
+        completedAt: "2026-02-01T00:00:00.000Z",
+      });
+      const { app } = harness({ tasks: [task] });
+
+      const response = await request(app).post(`/api/tasks/${task.id}/done`);
+
+      // Nothing was written, so neither the completion time nor the Version
+      // moved — a Replay that bumped either would invalidate an `If-Match`
+      // the caller was right to be holding.
+      expect(response.body.completedAt).toBe("2026-02-01T00:00:00.000Z");
+      expect(response.body.version).toBe(5);
+    });
+  });
+
+  it("completes once and succeeds twice when the same Task is asked twice", async () => {
+    const task = started();
+    const { app } = harness({ tasks: [task] });
+
+    const [first, second] = await Promise.all([
+      request(app).post(`/api/tasks/${task.id}/done`),
+      request(app).post(`/api/tasks/${task.id}/done`),
+    ]);
+
+    // One completion, two identical successes. Which request won is not the
+    // point and is not asserted; that exactly one of them did is.
+    //
+    // This is the *route* holding up its end — two 200s, one body, one marked
+    // a Replay. It is not proof of the concurrency design: the fake runs on
+    // one event loop, where two requests cannot interleave. What serialises
+    // real callers is the single conditional UPDATE in
+    // `drizzle/0002_mark_task_done.sql`, and only Postgres can demonstrate it.
+    expect([first.status, second.status]).toEqual([200, 200]);
+    expect(first.body).toEqual(second.body);
+    expect(
+      [first, second].filter(
+        (response) => response.headers["x-idempotent-replay"] === "true",
+      ),
+    ).toHaveLength(1);
+  });
+
+  describe("the moves it refuses", () => {
+    it.each(["PENDING", "ARCHIVED"] as const)(
+      "refuses to mark a %s Task Done as INVALID_TRANSITION",
+      async (status) => {
+        const task = aTask({ status });
+        const { app } = harness({ tasks: [task] });
+
+        const response = await request(app).post(`/api/tasks/${task.id}/done`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.error.code).toBe("INVALID_TRANSITION");
+      },
+    );
+
+    it("leaves a refused Task uncompleted", async () => {
+      const task = aTask({ status: "PENDING" });
+      const { app } = harness({ tasks: [task] });
+
+      await request(app).post(`/api/tasks/${task.id}/done`);
+      const after = await request(app).get(`/api/tasks/${task.id}`);
+
+      expect(after.body).toEqual(asWireTask(task));
+    });
+
+    it("reports another Actor's Task as NOT_FOUND", async () => {
+      const theirs = started({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+
+      const response = await request(app).post(`/api/tasks/${theirs.id}/done`);
+
+      // Only the Owner can mark a Task Done, and this is how that is
+      // enforced: the Task is not addressable at all (PLAN.md §7).
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe("NOT_FOUND");
+    });
+
+    it("leaves another Actor's Task untouched", async () => {
+      const theirs = started({ ownerId: OTHER_USER_ID });
+      const { app } = harness({ tasks: [theirs] });
+      const { app: theirApp } = harness({
+        tasks: [theirs],
+        requireAuth: authenticateAs(OTHER_USER_ID),
+      });
+
+      await request(app).post(`/api/tasks/${theirs.id}/done`);
+      const after = await request(theirApp).get(`/api/tasks/${theirs.id}`);
+
+      expect(after.body.status).toBe("IN_PROGRESS");
+      expect(after.body.completedAt).toBeNull();
+    });
+
+    it("reports a malformed id as NOT_FOUND without reaching the repository", async () => {
+      const markDone = jest.fn(async () => ({ outcome: "not_found" }) as const);
+      const { app } = harness({ taskRepository: { markDone } });
+
+      const response = await request(app).post(
+        `/api/tasks/${MALFORMED_ID}/done`,
+      );
+
+      expect(response.status).toBe(404);
+      expect(markDone).not.toHaveBeenCalled();
     });
   });
 });

@@ -26,9 +26,10 @@ Express endpoint over a Postgres function.
 
 The deciding factor is *where the race has to be resolved*. Marking Done must be
 atomic and idempotent: two simultaneous requests must produce one completion and
-two identical `200`s, and the "why did zero rows change?" read must happen inside
-the same transaction as the conditional `UPDATE`, or a task that was `PENDING`
-can be misreported as a replay. That is a database problem, and it is solved in
+two identical `200`s, and the "why did zero rows change?" read belongs inside
+the same transaction as the conditional `UPDATE`, or the window in which a task
+that was `PENDING` gets reported as a replay is a whole round trip wide rather
+than a statement. That is a database problem, and it is solved in
 the database whichever option wraps it. An Edge Function would not perform the
 atomic work — it would call the same Postgres function.
 
@@ -48,10 +49,11 @@ route it around the logging middleware that same requirement mandates.
 - `mark_task_done()` is the only entrance to `DONE`. `status` is therefore absent
   from every input schema, and there is no `PATCH { status }` path.
 - The transition rule `IN_PROGRESS → DONE` is written twice: in
-  `packages/shared/rules/transitions.ts` for the API pre-check and the UI, and in
-  the function's `WHERE` clause for atomic enforcement. This duplication is
-  deliberate defence in depth, and a unit test asserts the two agree so drift
-  fails a test rather than a demo.
+  `packages/shared/src/rules/transitions.ts`, which disables the UI control and
+  supplies the guard for the non-atomic transitions, and in the function's
+  `WHERE` clause for atomic enforcement. This duplication is deliberate defence
+  in depth, and `apps/api/src/db/mark-task-done.test.ts` reads the migration and
+  asserts the two agree, so drift fails a test rather than a demo.
 - The function is not `SECURITY DEFINER`; with RLS off and the API connecting on
   a role that owns `tasks`, that qualifier would change nothing.
 - If the brief is later read as requiring a cloud function specifically, the

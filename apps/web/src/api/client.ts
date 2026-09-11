@@ -55,6 +55,24 @@ export async function apiFetch<Output>(
   schema: z.ZodType<Output>,
   init: RequestInit = {},
 ): Promise<Output> {
+  const { body } = await apiFetchWithHeaders(path, schema, init);
+
+  return body;
+}
+
+/**
+ * The same request, with the response headers kept.
+ *
+ * Only Mark Done needs them: `X-Idempotent-Replay` is how the API says a Task
+ * was already finished, and that is a different thing to tell a person than a
+ * completion they just caused. Every other call throws its headers away, which
+ * is why this is the exception rather than what `apiFetch` returns.
+ */
+export async function apiFetchWithHeaders<Output>(
+  path: string,
+  schema: z.ZodType<Output>,
+  init: RequestInit = {},
+): Promise<{ body: Output; headers: Headers }> {
   const { getAccessToken, login } = useSessionStore.getState();
   const token = await getAccessToken();
 
@@ -79,7 +97,10 @@ export async function apiFetch<Output>(
     throw failure;
   }
 
-  return schema.parse(await response.json());
+  return {
+    body: schema.parse(await response.json()),
+    headers: response.headers,
+  };
 }
 
 async function describeFailure(response: Response): Promise<ApiError> {
