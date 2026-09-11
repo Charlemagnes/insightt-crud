@@ -47,6 +47,48 @@ export interface TaskListResult {
 }
 
 /**
+ * What a guarded Transition did, as a discriminated outcome rather than a Task
+ * that may or may not have changed.
+ *
+ * The distinction the union is here to preserve is `wrong_status` against
+ * `not_found`: they are `409` and `404`, and a repository that returned
+ * `Task | null` would have thrown the difference away before the route could
+ * report it.
+ */
+export type TransitionResult =
+  | { outcome: "changed"; task: Task }
+  | { outcome: "wrong_status"; task: Task }
+  | { outcome: "not_found" };
+
+/**
+ * The names `mark_task_done()` reports its four outcomes under. They are
+ * values and not only a type because the migration spells them in SQL as well,
+ * and `db/mark-task-done.test.ts` holds the two lists together.
+ */
+export const MARK_DONE_OUTCOMES = [
+  "completed",
+  "replayed",
+  "wrong_status",
+  "not_found",
+] as const;
+
+/**
+ * What marking a Task Done did. The same three outcomes a Transition has, plus
+ * the one that only Mark Done has: a Replay — the Task was already `DONE`,
+ * nothing was written, and that is a success (CONTEXT.md, "Replay").
+ *
+ * `replayed` is deliberately not folded into `completed`. It is the same `200`
+ * with the same body, but the route marks it with a header, and collapsing the
+ * two here would mean the API could no longer tell a caller whether their
+ * request was the one that finished the work.
+ */
+export type MarkDoneResult =
+  | { outcome: "completed"; task: Task }
+  | { outcome: "replayed"; task: Task }
+  | { outcome: "wrong_status"; task: Task }
+  | { outcome: "not_found" };
+
+/**
  * The Task repository. `apps/api` never imports a concrete implementation above
  * this line, so nothing that reads Tasks knows Drizzle exists — which is what
  * lets the whole HTTP test suite run against `createMemoryTaskRepository`.
@@ -79,4 +121,22 @@ export interface TaskRepository {
    * can produce a Task that starts anywhere else.
    */
   create(draft: OwnerScopedTaskDraft): Promise<Task>;
+
+  /**
+   * Moves a `PENDING` Task to `IN_PROGRESS`, through one guarded statement.
+   *
+   * The Status it may be moved from is not a parameter: it is the Status the
+   * shared machine names as the one before `IN_PROGRESS`, so a caller cannot
+   * ask for a Transition the rules do not allow.
+   */
+  start(query: OwnerScopedTaskQuery): Promise<TransitionResult>;
+
+  /**
+   * Marks a Task `DONE`, atomically and idempotently.
+   *
+   * Calling it twice is not an error and does not complete the Task twice: the
+   * second call comes back `replayed`, with the original completion time
+   * intact. Two callers racing get one completion and two identical successes.
+   */
+  markDone(query: OwnerScopedTaskQuery): Promise<MarkDoneResult>;
 }

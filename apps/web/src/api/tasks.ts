@@ -6,7 +6,10 @@ import {
   type TaskPage,
 } from "@insightt/shared";
 
-import { apiFetch, jsonRequest } from "@/api/client";
+import { apiFetch, apiFetchWithHeaders, jsonRequest } from "@/api/client";
+
+/** The Transition endpoints take no body — the target Status is in the path. */
+const POST: RequestInit = { method: "POST" };
 
 /** One page of the Actor's own Tasks, newest first. */
 export function listTasks(): Promise<TaskPage> {
@@ -25,4 +28,34 @@ export function listTasks(): Promise<TaskPage> {
  */
 export function createTask(input: CreateTaskInput): Promise<Task> {
   return apiFetch("/api/tasks", TaskSchema, jsonRequest("POST", input));
+}
+
+/** Starts a Task: `PENDING → IN_PROGRESS`. */
+export function startTask(id: string): Promise<Task> {
+  return apiFetch(`/api/tasks/${id}/start`, TaskSchema, POST);
+}
+
+/**
+ * A completed Task, and whether this request is what completed it.
+ *
+ * `replayed` is not a failure. It means the Task was already Done — a retry, a
+ * second tab, or a double click that got through — and the API answered the
+ * same `200` with the original completion time intact (CONTEXT.md, "Replay").
+ */
+export interface MarkDoneResponse {
+  task: Task;
+  replayed: boolean;
+}
+
+/** Marks a Task Done. Safe to call twice: the second call is a Replay. */
+export async function markTaskDone(id: string): Promise<MarkDoneResponse> {
+  const { body, headers } = await apiFetchWithHeaders(
+    `/api/tasks/${id}/done`,
+    TaskSchema,
+    POST,
+  );
+
+  // Readable only because CORS exposes it; a browser strips a header that is
+  // neither safelisted nor named in `exposedHeaders` (PLAN.md §10).
+  return { task: body, replayed: headers.get("X-Idempotent-Replay") === "true" };
 }

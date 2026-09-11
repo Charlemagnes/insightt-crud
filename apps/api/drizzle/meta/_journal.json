@@ -15,6 +15,13 @@
       "when": 1789084886653,
       "tag": "0001_updated_at_trigger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789088467869,
+      "tag": "0002_mark_task_done",
+      "breakpoints": true
     }
   ]
 }
