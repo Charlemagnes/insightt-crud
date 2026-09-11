@@ -217,16 +217,29 @@ export function TaskFormModal({ open, onClose, task }: TaskFormModalProps) {
       open={open}
       title={editing ? "Edit task" : "New task"}
       okText={editing ? "Save" : "Create"}
-      // One flight at a time: the button spins and stops accepting clicks, so a
-      // second press cannot produce a second Task or a second edit.
-      okButtonProps={{ loading: pending }}
+      // One flight at a time: a second press cannot produce a second Task or a
+      // second edit. `disabled` as well as `loading`, because antd's loading
+      // button refuses the click on its own but does not say so to the DOM or
+      // to a screen reader.
+      okButtonProps={{ loading: pending, disabled: pending }}
       cancelButtonProps={{ disabled: pending }}
+      // Every other way out goes with them. The request is already in flight;
+      // closing here would leave it to land against a form that is gone, and
+      // the person with no idea whether their edit took.
+      // The close button stays in place and goes grey rather than disappearing:
+      // a control that vanishes mid-save moves the header under the pointer.
+      closable={{ disabled: pending }}
+      keyboard={!pending}
       onOk={() => void submit()}
       onCancel={close}
       // The text is only worth keeping while the modal is open. What the
       // inputs then show is the effect above's business, not this prop's.
       destroyOnHidden
-      mask={{ closable: !pending }}
+      // The form is never dismissed by a click beside it. What is typed here
+      // is the only copy, and a stray click on the page behind would throw a
+      // half-written Task away without asking. Cancel and the close button are
+      // the ways out, and both are deliberate.
+      mask={{ closable: false }}
     >
       <Form
         form={form}

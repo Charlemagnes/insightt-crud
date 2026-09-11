@@ -1,5 +1,5 @@
 import type { TaskStatus } from "@insightt/shared";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { setupServer } from "msw/node";
 
@@ -179,6 +179,39 @@ describe("the task list", () => {
   });
 
   /**
+   * The regression this test exists for. The optimistic write lands the moment
+   * the request goes, so the row reads as its next Status — and the control
+   * relabels itself for the step *after* the one still in flight. Left live, a
+   * second click walks the machine a step ahead of the API, on a Version the
+   * browser has not been told yet.
+   *
+   * Marking Done is the case with a step left after it, which is what makes
+   * the control relabel rather than simply go quiet.
+   */
+  it("offers no further step until the API has confirmed the last one", async () => {
+    api.reset([aTask({ title: "Ship the API", status: "IN_PROGRESS" })]);
+
+    renderTaskList();
+    await screen.findByText("Ship the API");
+
+    const answer = api.holdAnswers();
+    await userEvent.click(buttonIn("Ship the API", "Mark done"));
+
+    // Already wearing the next step's name, which is the click being refused.
+    const next = await within(rowFor("Ship the API")).findByRole("button", {
+      name: "Archive",
+    });
+    expect(next).toBeDisabled();
+
+    answer();
+
+    expect(await screen.findByText("Task done")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(buttonIn("Ship the API", "Archive")).toBeEnabled(),
+    );
+  });
+
+  /**
    * The regression this test exists for. antd's form store outlives the modal's
    * contents, and it wins over `initialValues` when the fields remount — so the
    * second Task edited in a session came up wearing the first one's title, and
@@ -205,6 +238,93 @@ describe("the task list", () => {
 
     expect(await screen.findByLabelText("Title")).toHaveValue("Ship the API");
     expect(screen.getByLabelText("Description")).toHaveValue("The API");
+  });
+
+  /**
+   * The counterpart to the test above, on the row's other two controls. A
+   * Transition raises the Version, and the row is holding the old one until the
+   * response says what it became — so an Edit opened in that window would
+   * submit an `If-Match` the API has already moved past, and a Delete would be
+   * a second command against a Task mid-move.
+   */
+  it("closes the rest of the row while a Transition is in flight", async () => {
+    api.reset([aTask({ title: "Ship the API", status: "IN_PROGRESS" })]);
+
+    renderTaskList();
+    await screen.findByText("Ship the API");
+
+    const answer = api.holdAnswers();
+    await userEvent.click(buttonIn("Ship the API", "Mark done"));
+
+    expect(buttonIn("Ship the API", "Edit")).toBeDisabled();
+    expect(buttonIn("Ship the API", "Delete")).toBeDisabled();
+
+    answer();
+
+    expect(await screen.findByText("Task done")).toBeInTheDocument();
+    await waitFor(() => expect(buttonIn("Ship the API", "Edit")).toBeEnabled());
+    expect(buttonIn("Ship the API", "Delete")).toBeEnabled();
+  });
+
+  /**
+   * The form's own version of the same rule. Create and Save are one request
+   * each, and every way out of the modal closes while one is in flight — a
+   * dismissal there would leave the request to land against a form that is
+   * gone, and the person with no idea whether their Task was made.
+   */
+  it("closes the form's controls while it is saving", async () => {
+    api.reset([]);
+
+    renderTaskList();
+    await screen.findByText("No tasks yet.");
+
+    await userEvent.click(screen.getByRole("button", { name: /New task/ }));
+    await userEvent.type(await screen.findByLabelText("Title"), "Write it up");
+
+    const answer = api.holdAnswers();
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    // `/Create/` and not the exact name: antd's spinner is an image labelled
+    // "loading", so the button's accessible name grows a word the moment it
+    // starts spinning — which is exactly the state being asserted.
+    const dialog = within(screen.getByRole("dialog"));
+    await waitFor(() =>
+      expect(dialog.getByRole("button", { name: /Create/ })).toBeDisabled(),
+    );
+    expect(dialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(dialog.getByRole("button", { name: "Close" })).toBeDisabled();
+    // The one that opens the form is off for as long as the form is up, so a
+    // create in flight cannot be joined by a second one behind it.
+    expect(screen.getByRole("button", { name: /New task/ })).toBeDisabled();
+
+    answer();
+
+    expect(await screen.findByText("Task created")).toBeInTheDocument();
+    expect(await screen.findByText("Write it up")).toBeInTheDocument();
+  });
+
+  /**
+   * What is typed into the form is the only copy of it. antd closes a modal on
+   * a click beside it by default, which would throw a half-written Task away
+   * without asking — so this one does not, and Cancel is the way out.
+   */
+  it("keeps the form open when the page behind it is clicked", async () => {
+    api.reset([]);
+
+    renderTaskList();
+    await screen.findByText("No tasks yet.");
+
+    await userEvent.click(screen.getByRole("button", { name: /New task/ }));
+    await userEvent.type(await screen.findByLabelText("Title"), "Write it up");
+
+    // The element antd hangs that behaviour off: the scrollable wrapper the
+    // dialog floats in, whose visible area is everything around it.
+    const outside = document.querySelector(".ant-modal-wrap");
+    expect(outside).not.toBeNull();
+    await userEvent.click(outside as HTMLElement);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toHaveValue("Write it up");
   });
 
   /**

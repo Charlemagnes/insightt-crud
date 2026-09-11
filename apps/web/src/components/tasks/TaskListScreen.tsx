@@ -87,7 +87,7 @@ export function TaskListScreen() {
           // The same modal the button above opens, reached from the one place a
           // person with no Tasks is actually looking.
           action: (
-            <Button type="primary" onClick={openCreate}>
+            <Button type="primary" onClick={openCreate} disabled={formOpen}>
               Create your first task
             </Button>
           ),
@@ -109,10 +109,16 @@ export function TaskListScreen() {
           <Flex vertical gap={16}>
             <Flex justify="space-between" align="center" wrap gap={12}>
               <TaskFilters />
+              {/* Off while the form is open, which is also the whole of a
+                  create in flight: the modal is what submits it, and it stays
+                  up until the API answers. The mask hides this button either
+                  way — what the disabled state adds is that the DOM and a
+                  screen reader agree with the mask. */}
               <Button
                 type="primary"
                 icon={<Plus size={16} />}
                 onClick={openCreate}
+                disabled={formOpen}
               >
                 New task
               </Button>

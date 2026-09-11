@@ -30,10 +30,13 @@ import {
  * `ARCHIVED` — a Task that is finished and put away has no field left to
  * change.
  *
- * Delete asks nothing at all. It is legal from every Status including
- * `ARCHIVED` (PLAN.md §7), so it is the one control that is never disabled —
- * and the only one behind a confirmation, because it is the only one that
- * cannot be undone by another click.
+ * Delete asks nothing about Status: it is legal from every one of them,
+ * `ARCHIVED` included (PLAN.md §7). It is the only control behind a
+ * confirmation, because it is the only one no other click can undo.
+ *
+ * All three go quiet while any request this row made is in flight. A row is
+ * one Task, and a second command issued against a Version the API has not
+ * answered with yet is sent against the Version the browser still believes in.
  *
  * All three are icons with a tooltip for their name. The icon is what is drawn
  * and the `aria-label` is what is announced, so the name is never only a
@@ -75,7 +78,6 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
   const steps: Record<Exclude<TaskStatus, "PENDING">, Step> = {
     IN_PROGRESS: {
       label: "Start",
-      pending: start.isPending,
       run: () =>
         run(async () => {
           await start.mutateAsync(task.id);
@@ -84,7 +86,6 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
     },
     DONE: {
       label: "Mark done",
-      pending: done.isPending,
       run: () =>
         run(async () => {
           const { replayed } = await done.mutateAsync(task.id);
@@ -96,7 +97,6 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
     },
     ARCHIVED: {
       label: "Archive",
-      pending: archive.isPending,
       run: () =>
         run(async () => {
           await archive.mutateAsync(task.id);
@@ -114,6 +114,19 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
   const to = nextStatus(task.status);
   const step = to === null || to === "PENDING" ? null : steps[to];
 
+  // Any Transition in flight, not the one the control is currently offering.
+  // The optimistic write lands the moment the request goes, so by the time it
+  // is in flight the row already reads as its *next* Status and the control has
+  // moved on to the step after it — asking that step whether it is pending
+  // would answer no, hand back a live button, and let the machine be clicked
+  // through faster than the API can confirm a single move.
+  const stepping = start.isPending || done.isPending || archive.isPending;
+  // Anything at all in flight, which is what the whole row answers to. A
+  // Transition raises the Task's Version, and until the response says what it
+  // became, the row is holding the old one — so an Edit opened mid-Transition
+  // would submit an `If-Match` that is already stale.
+  const busy = stepping || deletion.isPending;
+
   return (
     <Space size={12}>
       <IconAction label="Edit">
@@ -121,21 +134,23 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
           size="medium"
           aria-label="Edit"
           icon={<Pencil size={16} />}
-          disabled={!canEditAnything(task.status)}
+          disabled={!canEditAnything(task.status) || busy}
           onClick={() => onEdit(task)}
         />
       </IconAction>
       {/* The terminal Status keeps the control rather than dropping it, so the
           three cells stay in the same three places down the column — and the
           tooltip says why it is off instead of leaving a gap to interpret. */}
+      {/* Off while a Transition is in flight: one click is one step, and the
+          next step is only offered once the API has confirmed the last one. */}
       <IconAction label={step?.label ?? "No next step"}>
         <Button
           size="medium"
           type="primary"
           aria-label={step?.label ?? "No next step"}
           icon={<ArrowRight size={16} />}
-          disabled={step === null}
-          loading={step?.pending ?? false}
+          disabled={step === null || busy}
+          loading={stepping}
           onClick={() => void step?.run()}
         />
       </IconAction>
@@ -147,7 +162,14 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
         // The loading state belongs on the confirm control, not the row's
         // button: the person is looking at the popover when the request goes,
         // and it is the control they pressed.
-        okButtonProps={{ danger: true, loading: deletion.isPending }}
+        // `disabled` as well as `loading`: antd's loading button refuses
+        // clicks on its own, but only the disabled state is the one the DOM and
+        // a screen reader report, so without it the control says it is live.
+        okButtonProps={{
+          danger: true,
+          loading: deletion.isPending,
+          disabled: deletion.isPending,
+        }}
         // The promise is returned rather than discarded, and that is what makes
         // the line above visible: antd closes the popover the moment `onConfirm`
         // hands back anything that is not thenable, which would take the confirm
@@ -157,16 +179,19 @@ export function TaskActions({ task, onEdit }: TaskActionsProps) {
         // always resolves and the popover always closes.
         onConfirm={() => runDelete()}
       >
-        {/* Tooltip directly, without the wrapper the other two need: this
-            control is never disabled, and Popconfirm has to reach the element
-            it opens from — a plain `<span>` in between would swallow the click
-            handler it clones onto its child. */}
+        {/* Tooltip directly, without the wrapper the other two need:
+            Popconfirm has to reach the element it opens from, and a plain
+            `<span>` in between would swallow the click handler it clones onto
+            its child. The tooltip is lost while the control is off, which is
+            the trade — this is the one control whose name is also its icon's
+            only reading, and the popover is what is on screen by then. */}
         <Tooltip title="Delete">
           <Button
             size="medium"
             danger
             aria-label="Delete"
             icon={<Trash2 size={16} />}
+            disabled={busy}
           />
         </Tooltip>
       </Popconfirm>
@@ -187,7 +212,6 @@ interface TaskActionsProps {
 interface Step {
   /** What the step is called, in the tooltip and to a screen reader. */
   label: string;
-  pending: boolean;
   run: () => Promise<void>;
 }
 

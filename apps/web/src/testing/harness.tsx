@@ -89,9 +89,9 @@ export function aTask(overrides: Partial<Task> = {}): Task {
  * invalidates, and a fake that replayed the original page would hand the old
  * row straight back and make a passing assertion impossible to trust.
  *
- * `/start` is deliberately absent: no test presses it, and MSW is configured to
- * fail on a request it has no handler for, so the day one does the gap says so
- * rather than answering wrongly.
+ * `/start` and `DELETE` are deliberately absent: no test presses them, and MSW
+ * is configured to fail on a request it has no handler for, so the day one does
+ * the gap says so rather than answering wrongly.
  */
 export interface FakeTaskApi {
   handlers: RequestHandler[];
@@ -103,10 +103,24 @@ export interface FakeTaskApi {
    * the one path that cannot be reached from the screen alone.
    */
   completeElsewhere: (id: string) => void;
+  /**
+   * Holds every answer open until the returned function is called, so a test
+   * can assert what the screen looks like *while* a request is in flight —
+   * the window an optimistic write is visible in and the only one where a
+   * control's in-flight state exists at all.
+   */
+  holdAnswers: () => () => void;
 }
 
 export function fakeTaskApi(): FakeTaskApi {
   let tasks: Task[] = [];
+  /** Unset unless a test is holding answers open; see `holdAnswers`. */
+  let gate: Promise<void> | null = null;
+
+  /** What every handler waits on before it answers. */
+  const answering = async () => {
+    if (gate) await gate;
+  };
 
   const url = (path: string) => `${config.apiUrl}${path}`;
 
@@ -132,6 +146,22 @@ export function fakeTaskApi(): FakeTaskApi {
   return {
     reset: (next) => {
       tasks = next.map((task) => ({ ...task }));
+      // A test that failed mid-hold must not leave the next one waiting on a
+      // promise nothing is left to resolve.
+      gate = null;
+    },
+
+    holdAnswers: () => {
+      let release = () => {};
+
+      gate = new Promise<void>((resolve) => {
+        release = () => {
+          gate = null;
+          resolve();
+        };
+      });
+
+      return release;
     },
 
     completeElsewhere: (id) => {
@@ -140,7 +170,9 @@ export function fakeTaskApi(): FakeTaskApi {
     },
 
     handlers: [
-      http.get(url("/api/tasks"), ({ request }) => {
+      http.get(url("/api/tasks"), async ({ request }) => {
+        await answering();
+
         const query = new URL(request.url).searchParams;
         const status = query.get("status");
         const page = Number(query.get("page") ?? TASK_PAGE.first);
@@ -174,48 +206,80 @@ export function fakeTaskApi(): FakeTaskApi {
       // there is a success rather than a `409` (PLAN.md §8). The header is how
       // a client tells the two apart, and reproducing it is the whole point of
       // the Replay test.
-      http.post<{ id: string }>(url("/api/tasks/:id/done"), ({ params }) => {
-        const task = find(params.id);
+      http.post<{ id: string }>(
+        url("/api/tasks/:id/done"),
+        async ({ params }) => {
+          await answering();
 
-        if (!task) return refusal(404, "NOT_FOUND", "Task not found");
+          const task = find(params.id);
 
-        if (task.status === "DONE") {
-          return HttpResponse.json(task, {
-            headers: { "X-Idempotent-Replay": "true" },
-          });
-        }
+          if (!task) return refusal(404, "NOT_FOUND", "Task not found");
 
-        if (task.status !== "IN_PROGRESS") {
-          return refusal(
-            409,
-            "INVALID_TRANSITION",
-            `A ${task.status} task cannot become DONE`,
-          );
-        }
+          if (task.status === "DONE") {
+            return HttpResponse.json(task, {
+              headers: { "X-Idempotent-Replay": "true" },
+            });
+          }
 
-        return HttpResponse.json(store(completed(task)));
+          if (task.status !== "IN_PROGRESS") {
+            return refusal(
+              409,
+              "INVALID_TRANSITION",
+              `A ${task.status} task cannot become DONE`,
+            );
+          }
+
+          return HttpResponse.json(store(completed(task)));
+        },
+      ),
+
+      // Creating. The Task the API invents is the one the list is then
+      // refetched into, so the fake has to store it rather than echo it back —
+      // a create whose Task never joined the list would pass the assertion on
+      // the message and fail the one on the row.
+      http.post(url("/api/tasks"), async ({ request }) => {
+        await answering();
+
+        const input = (await request.json()) as {
+          title: string;
+          description?: string | null;
+        };
+        const task = aTask({
+          title: input.title,
+          description: input.description ?? null,
+          status: "PENDING",
+        });
+
+        tasks = [...tasks, task];
+
+        return HttpResponse.json(task, { status: 201 });
       }),
 
       // Archiving is the one Transition the list's own filter notices: the Task
       // is stored exactly as before with a new Status, and `GET /api/tasks`
       // above stops returning it.
-      http.post<{ id: string }>(url("/api/tasks/:id/archive"), ({ params }) => {
-        const task = find(params.id);
+      http.post<{ id: string }>(
+        url("/api/tasks/:id/archive"),
+        async ({ params }) => {
+          await answering();
 
-        if (!task) return refusal(404, "NOT_FOUND", "Task not found");
+          const task = find(params.id);
 
-        if (task.status !== "DONE") {
-          return refusal(
-            409,
-            "INVALID_TRANSITION",
-            `A ${task.status} task cannot become ARCHIVED`,
+          if (!task) return refusal(404, "NOT_FOUND", "Task not found");
+
+          if (task.status !== "DONE") {
+            return refusal(
+              409,
+              "INVALID_TRANSITION",
+              `A ${task.status} task cannot become ARCHIVED`,
+            );
+          }
+
+          return HttpResponse.json(
+            store({ ...task, status: "ARCHIVED", version: task.version + 1 }),
           );
-        }
-
-        return HttpResponse.json(
-          store({ ...task, status: "ARCHIVED", version: task.version + 1 }),
-        );
-      }),
+        },
+      ),
     ],
   };
 }
