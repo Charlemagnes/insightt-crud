@@ -1,11 +1,3 @@
-import "dotenv/config";
-
-import { eq } from "drizzle-orm";
-
-import { createDatabase } from "@/db/client";
-import { tasks, type NewTaskRow } from "@/db/schema";
-import { loadEnv } from "@/env";
-
 /**
  * Places a handful of Tasks under one Owner, so the list is demoable before
  * there is an endpoint that can create one.
@@ -15,13 +7,26 @@ import { loadEnv } from "@/env";
  *
  * ```
  * npm run db:seed -- 'auth0|68c0…'
- * npm run db:seed -- 'auth0|68c0…' --replace   # clear that Owner's Tasks first
+ * npm run db:seed -- 'auth0|68c0…' replace   # clear that Owner's Tasks first
  * ```
  *
- * `--replace` deletes only the named Owner's rows. Seeding is a development
- * convenience and it is still someone's data; a blanket `delete from tasks`
- * would take out the other Owner you were using to check that scoping works.
+ * `replace` is a bare word and not `--replace` because npm eats a second
+ * dash-prefixed argument after its own `--`, and a flag that silently does
+ * nothing is worse than an ugly one.
+ *
+ * It deletes only the named Owner's rows. Seeding is a development convenience
+ * and it is still someone's data; a blanket `delete from tasks` would take out
+ * the other Owner you were using to check that scoping works.
  */
+
+import "dotenv/config";
+
+import { eq } from "drizzle-orm";
+
+import { createDatabase } from "@/db/client";
+import { tasks, type NewTaskRow } from "@/db/schema";
+import { loadEnv } from "@/env";
+
 /**
  * `createdAt` is required here even though the column defaults, because the
  * point of the seed is a list with a visible newest-first order — five rows
@@ -74,20 +79,20 @@ function daysAgo(days: number): Date {
 }
 
 async function main(): Promise<void> {
-  const [ownerId, ...flags] = process.argv.slice(2);
+  const [ownerId, ...rest] = process.argv.slice(2);
 
   if (!ownerId) {
     throw new Error(
-      "Usage: npm run db:seed -- '<user id>' [--replace]\n" +
+      "Usage: npm run db:seed -- '<user id>' [replace]\n" +
         "The User ID is the Auth0 `sub`, which the API logs on the `actor` line.",
     );
   }
 
   const env = loadEnv();
-  const { db, pool } = createDatabase(env.databaseUrl);
+  const { db, pool } = createDatabase(env.databaseUrl, env.databaseCaCertPath);
 
   try {
-    if (flags.includes("--replace")) {
+    if (rest.includes("replace")) {
       await db.delete(tasks).where(eq(tasks.ownerId, ownerId));
     }
 

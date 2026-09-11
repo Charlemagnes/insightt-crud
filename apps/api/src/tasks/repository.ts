@@ -7,7 +7,7 @@ import type { Task, TaskStatus } from "@insightt/shared";
  *
  * Deliberately not called `TaskListQuery`: PLAN.md §11 reserves that name for
  * the shared Zod schema of the query *string*, which carries no `userId` — a
- * caller never gets to choose whose Tasks it reads.
+ * request never gets to choose whose Tasks it reads.
  */
 export interface OwnerScopedListQuery {
   userId: string;
@@ -37,7 +37,7 @@ export interface TaskListResult {
  * It returns wire-shaped `Task` values, not database rows: the snake_case row
  * stops at `mappers.ts`, one layer below (PLAN.md §11).
  *
- * Owner scoping is a property of the interface, not of its callers. Both
+ * Owner scoping is a property of the interface, not of its call sites. Both
  * methods take a `userId` and neither offers a way to omit it, so a read that
  * crosses Owners cannot be written by accident — the compiler asks for the
  * Actor before it will accept the call.

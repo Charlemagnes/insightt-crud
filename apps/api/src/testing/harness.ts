@@ -7,6 +7,7 @@ import type { LogRecord } from "@/middleware/logging";
 import type { TaskRepository } from "@/tasks/repository";
 import {
   createMemoryTaskRepository,
+  withoutOwner,
   type OwnedTask,
 } from "@/tasks/repository.memory";
 
@@ -109,6 +110,4 @@ export function aTask(overrides: Partial<OwnedTask> = {}): OwnedTask {
 }
 
 /** The wire shape of a stored Task: what the API should return for it. */
-export function asWireTask({ ownerId: _ownerId, ...task }: OwnedTask): Task {
-  return task;
-}
+export const asWireTask = withoutOwner;

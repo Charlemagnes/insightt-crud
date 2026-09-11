@@ -235,7 +235,7 @@ describe("GET /api/tasks/:id", () => {
     const response = await request(app).get(`/api/tasks/${MALFORMED_ID}`);
 
     // Parsed at the boundary, so `where id = 'not-a-uuid'` never happens —
-    // Postgres would raise a type error and the caller would see a 500.
+    // Postgres would raise a type error and the Actor would see a 500.
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe("NOT_FOUND");
     expect(findById).not.toHaveBeenCalled();

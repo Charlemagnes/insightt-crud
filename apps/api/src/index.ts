@@ -13,7 +13,7 @@ import { createDrizzleTaskRepository } from "@/tasks/repository.drizzle";
  * without it, which is why it stays this short.
  */
 const env = loadEnv();
-const { db } = createDatabase(env.databaseUrl);
+const { db } = createDatabase(env.databaseUrl, env.databaseCaCertPath);
 
 const app = createApp({
   taskRepository: createDrizzleTaskRepository(db),

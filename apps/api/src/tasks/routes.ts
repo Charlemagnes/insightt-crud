@@ -12,8 +12,8 @@ import { ApiError } from "@/middleware/errors";
 import { validate } from "@/middleware/validate";
 import type { TaskRepository } from "@/tasks/repository";
 
-const listRequest = validate({ query: TaskListQuery });
-const taskRequest = validate({ params: TaskIdParam });
+const listValidator = validate({ query: TaskListQuery });
+const taskIdValidator = validate({ params: TaskIdParam });
 
 /**
  * The Task routes, mounted behind the auth stack — so `actorOf` always has an
@@ -25,8 +25,8 @@ const taskRequest = validate({ params: TaskIdParam });
 export function createTaskRoutes(repository: TaskRepository): Router {
   const router = Router();
 
-  router.get("/", listRequest, async (req, res) => {
-    const { page, pageSize, status } = listRequest.read(req).query;
+  router.get("/", listValidator, async (req, res) => {
+    const { page, pageSize, status } = listValidator.read(req).query;
 
     const { items, total } = await repository.list({
       userId: actorOf(req).userId,
@@ -39,8 +39,8 @@ export function createTaskRoutes(repository: TaskRepository): Router {
     res.json(body);
   });
 
-  router.get("/:id", taskRequest, async (req, res) => {
-    const { id } = taskRequest.read(req).params;
+  router.get("/:id", taskIdValidator, async (req, res) => {
+    const { id } = taskIdValidator.read(req).params;
 
     const task = await repository.findById({
       userId: actorOf(req).userId,

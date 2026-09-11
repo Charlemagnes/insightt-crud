@@ -41,16 +41,14 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
         })
         .from(tasks)
         .where(owned)
-        // `id` breaks the tie. Two Tasks can share a `created_at` down to the
-        // microsecond, and on an ordering that is not total Postgres may return
-        // them in either order — the same row then shows up on two pages, or on
-        // none.
+        // `id` breaks the tie, without which paging is not stable — PLAN.md §6.
         .orderBy(desc(tasks.createdAt), desc(tasks.id))
         .limit(pageSize)
         .offset((page - 1) * pageSize);
 
       return {
         items: rows.map((row) => toTask(row.task)),
+        // No rows means no row to read the count off — see `countOwned`.
         total: rows[0]?.total ?? (await countOwned(db, owned)),
       };
     },
@@ -61,7 +59,7 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
         .from(tasks)
         // Owner and id in one predicate: a Task belonging to someone else does
         // not match, so it comes back missing rather than forbidden, and the
-        // caller learns nothing about whether it exists.
+        // Actor learns nothing about whether it exists.
         .where(and(eq(tasks.id, id), eq(tasks.ownerId, userId)))
         .limit(1);
 
@@ -77,7 +75,10 @@ export function createDrizzleTaskRepository(db: Database): TaskRepository {
  * the pager onto page 1 and hide the Tasks that are really present, so the
  * empty page pays for a second round trip and no other page does.
  */
-async function countOwned(db: Database, owned: SQL | undefined) {
+async function countOwned(
+  db: Database,
+  owned: SQL | undefined,
+): Promise<number> {
   const [row] = await db.select({ total: count() }).from(tasks).where(owned);
   return row?.total ?? 0;
 }

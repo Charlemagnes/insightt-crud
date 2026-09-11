@@ -16,7 +16,7 @@ import { loadEnv } from "@/env";
  */
 async function main(): Promise<void> {
   const env = loadEnv();
-  const { db, pool } = createDatabase(env.databaseUrl);
+  const { db, pool } = createDatabase(env.databaseUrl, env.databaseCaCertPath);
 
   try {
     await migrate(db, { migrationsFolder: `${__dirname}/../../drizzle` });

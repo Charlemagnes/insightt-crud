@@ -59,7 +59,7 @@ export type TaskPage = z.infer<typeof TaskPageSchema>;
  */
 export const TaskListQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  // Capped so a caller cannot ask for the whole table in one round trip.
+  // Capped so one request cannot ask for the whole table in a single round trip.
   pageSize: z.coerce.number().int().min(1).max(100).default(10),
   status: TaskStatus.optional(),
 });

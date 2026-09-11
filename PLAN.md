@@ -123,6 +123,17 @@ Zustand, **Ant Design v6**, `@auth0/auth0-react`.
 **Database** — Supabase Postgres, accessed over the Supavisor pooler in
 session mode (direct connections are IPv6-first; session mode rather than
 transaction mode because transaction mode does not support prepared statements).
+The transaction-mode port is rejected in `env.ts` rather than described, because
+it fails late and obscurely: the pool connects, early queries work, and a
+prepared statement then errors somewhere that looks like a Drizzle bug.
+
+**TLS.** The pooler presents a self-signed chain, so Node refuses it unless told
+which root to trust. `DATABASE_CA_CERT` points at Supabase's certificate and
+turns verification on; without it the connection is encrypted but not
+authenticated. That is the weaker setting, and it is the default only because
+the deployment target is local. It is written as two explicit branches in
+`db/client.ts` so the trade stays visible, and the README names it alongside the
+tokens-in-`localStorage` one.
 
 Resolved install notes:
 
@@ -697,7 +708,7 @@ bash scripts/setup-auth0.sh    # one-time Auth0 tenant + env setup
 npm run dev                    # Express on :4000, Next on :3000, concurrently
 npm run db:generate            # drizzle-kit — generate a migration from schema.ts
 npm run db:migrate             # apply migrations
-npm run db:seed -- '<user id>' # place demo Tasks under one Owner
+npm run db:seed -- '<user id>' # demo Tasks under one Owner; 'replace' clears theirs
 npm run test                   # unit + integration
 npm run test:e2e               # Cypress
 npm run docs:api               # z.toJSONSchema() -> docs/openapi.json
@@ -707,7 +718,7 @@ Environment:
 
 | File | Variables |
 |---|---|
-| `apps/api/.env` | `DATABASE_URL` (Supavisor session-mode string), `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `PORT`, `WEB_ORIGIN` |
+| `apps/api/.env` | `DATABASE_URL` (Supavisor session-mode string), `DATABASE_CA_CERT` (optional), `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `PORT`, `WEB_ORIGIN` |
 | `apps/web/.env.local` | `NEXT_PUBLIC_AUTH0_DOMAIN`, `NEXT_PUBLIC_AUTH0_CLIENT_ID`, `NEXT_PUBLIC_AUTH0_AUDIENCE`, `NEXT_PUBLIC_API_URL` |
 | `cypress.env.json` | `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_REALM`, `CYPRESS_CLIENT_ID`, `CYPRESS_CLIENT_SECRET`, `AUTH0_TEST_EMAIL`, `AUTH0_TEST_PASSWORD` |
 
@@ -718,7 +729,8 @@ this runs it themselves.
 **Documentation deliverables:**
 
 - **README** — setup, env vars, the item 3 and item 10 evaluations (linking to
-  the ADRs), the concurrency design, the tokens-in-`localStorage` trade, and the
+  the ADRs), the concurrency design, the tokens-in-`localStorage` and
+  unverified-TLS trades (§4), and the
   reading of "a backend unit test written with React Testing Library".
 - **TSDoc** on `packages/shared` exports, the repository layer, and the three
   middlewares. Not on every React component, where it reads as padding.

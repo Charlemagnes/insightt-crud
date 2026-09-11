@@ -28,6 +28,24 @@ describe("loadEnv", () => {
     );
   });
 
+  it("rejects the transaction-mode pooler by its port", () => {
+    // It fails late otherwise: the pool connects, early queries work, and a
+    // prepared statement then errors somewhere that looks like a Drizzle bug.
+    expect(() =>
+      loadEnv({
+        ...COMPLETE,
+        DATABASE_URL:
+          "postgresql://postgres.ref:secret@pooler.example:6543/postgres",
+      }),
+    ).toThrow(/session pooler/);
+  });
+
+  it("leaves the CA certificate path unset when none was given", () => {
+    // Absent means encrypted but unverified, which `db/client.ts` decides —
+    // `loadEnv` only reports what the environment said.
+    expect(loadEnv(COMPLETE).databaseCaCertPath).toBeUndefined();
+  });
+
   it("rejects a WEB_ORIGIN that is not a URL", () => {
     expect(() => loadEnv({ ...COMPLETE, WEB_ORIGIN: "localhost:3000" })).toThrow(
       /WEB_ORIGIN/,

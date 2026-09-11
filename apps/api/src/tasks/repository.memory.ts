@@ -13,6 +13,18 @@ export interface OwnedTask extends Task {
 }
 
 /**
+ * Drops the Owner, the way `toTask` does when it maps a database row. Without
+ * it the fake would hand routes a field the real repository never returns, and
+ * a test could pass on a response shape production cannot produce.
+ *
+ * Exported because the test harness needs the same answer to the same question:
+ * given this stored Task, what should the API return for it?
+ */
+export function withoutOwner({ ownerId: _ownerId, ...task }: OwnedTask): Task {
+  return task;
+}
+
+/**
  * The in-memory fake, and the repository the whole HTTP test suite runs
  * against. It exists so a test can drive the real middleware stack — real CORS,
  * real logging, real auth boundary, real error mapping — with no database
@@ -44,8 +56,9 @@ export function createMemoryTaskRepository(
       const owned = tasks
         .filter((task) => task.ownerId === userId)
         .filter((task) => status === undefined || task.status === status)
-        // Newest first, with `id` breaking a tie the same way the SQL does, so
-        // two Tasks sharing a `createdAt` page identically in both.
+        // Newest first, with `id` breaking a tie exactly as the SQL does. A
+        // fake that ordered differently would let a paging bug pass here and
+        // fail in production.
         .sort(
           (a, b) =>
             b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
@@ -66,13 +79,4 @@ export function createMemoryTaskRepository(
       return found ? withoutOwner(found) : null;
     },
   };
-}
-
-/**
- * Drops the Owner, the way `toTask` does when it maps a row. Without it the
- * fake would hand routes a field the real repository never returns, and a test
- * could pass on a response shape production cannot produce.
- */
-function withoutOwner({ ownerId: _ownerId, ...task }: OwnedTask): Task {
-  return task;
 }

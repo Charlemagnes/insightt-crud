@@ -29,7 +29,7 @@ npm run build                  # production build (also the only full type-check
 npm run lint                   # fans out to each workspace; eslint flat config in apps/web
 npm run db:generate            # drizzle-kit — generate a migration from schema.ts
 npm run db:migrate             # apply migrations
-npm run db:seed -- '<user id>' # demo Tasks under one Owner; --replace clears theirs first
+npm run db:seed -- '<user id>' # demo Tasks under one Owner; add 'replace' to clear theirs first
 npm run test                   # Jest: unit (apps/api, packages/shared) + integration (apps/web)
 npm run test:e2e               # Cypress
 npm run docs:api               # z.toJSONSchema() -> docs/openapi.json

@@ -18,8 +18,8 @@ import type { TaskRow } from "@/db/schema";
  * is — dragging the data layer into the frontend's import graph.
  *
  * `ownerId` is dropped rather than renamed. The API only ever returns the
- * Actor's own Tasks, so publishing the Owner would tell the caller something it
- * already knows, in a field a later endpoint might be tempted to let it write.
+ * Actor's own Tasks, so publishing the Owner would tell the Actor something they
+ * already know, in a field a later endpoint might be tempted to let them write.
  *
  * This function is the only place that knows both shapes.
  */
