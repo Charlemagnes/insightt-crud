@@ -77,7 +77,7 @@ export function createTaskRoutes(repository: TaskRepository): Router {
     sendTask(res, created);
   });
 
-  // No request body on either Transition endpoint: the target Status is in the
+  // No request body on any Transition endpoint: the target Status is in the
   // path, so there is nothing to validate and nothing a client can contradict.
   router.post("/:id/start", taskIdValidator, async (req, res) => {
     const result = await repository.start({

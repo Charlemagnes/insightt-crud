@@ -72,13 +72,25 @@ function aFunctionRow(
  * missing `owner_id` predicate would pass every one of those tests while
  * leaking every Task in the table.
  */
-function recordingRepository(rows: unknown[] = []) {
+function recordingRepository(rows: unknown[] = [], thenRows?: unknown[]) {
   const statements: Statement[] = [];
 
   const client = {
     query: async (config: { text: string }, values: unknown[]) => {
       statements.push({ text: config.text, values });
-      return { rows, rowCount: rows.length, command: "SELECT", fields: [] };
+
+      // `thenRows` answers the second statement, which is the follow-up read a
+      // guarded Transition makes when its `UPDATE` matched nothing. Without a
+      // way to answer the two differently, the read can only ever come back
+      // empty and the `wrong_status` arm is unreachable.
+      const answer = statements.length === 2 && thenRows ? thenRows : rows;
+
+      return {
+        rows: answer,
+        rowCount: answer.length,
+        command: "SELECT",
+        fields: [],
+      };
     },
   };
 
@@ -452,6 +464,32 @@ describe("createDrizzleTaskRepository", () => {
       expect(statements).toHaveLength(2);
       expect(statements[1].values).toEqual([query.id, query.userId, 1]);
       expect(result).toEqual({ outcome: "not_found" });
+    });
+
+    it("reports the Status that refused it when the Task is the Actor's", async () => {
+      // The `UPDATE` matched nothing and the follow-up read found the Task, so
+      // it exists and the Actor owns it — the refusal is the Status, and the
+      // route turns this into `409` rather than `404`.
+      //
+      // `start` shares this code path: both Transitions are one call to
+      // `transition()`, and a second copy of this test would only exercise the
+      // same branch with a different Status.
+      const { repository } = recordingRepository([], [aTaskRow()]);
+
+      const result = await repository.archive(query);
+
+      expect(result).toMatchObject({
+        outcome: "wrong_status",
+        task: { id: query.id, status: "PENDING" },
+      });
+    });
+
+    it("never publishes the Owner on the Task that refused it", async () => {
+      const { repository } = recordingRepository([], [aTaskRow()]);
+
+      const result = await repository.archive(query);
+
+      expect(result).not.toHaveProperty("task.ownerId");
     });
   });
 
