@@ -65,6 +65,17 @@ export function createRequestLogging(log: LogSink): RequestHandler {
     const startedAt = process.hrtime.bigint();
     req.requestId = requestId;
 
+    // The response body has to be taken as it is written — by `close` it has
+    // gone out and Express keeps no copy. Only `res.json` is wrapped, which is
+    // every answer the API gives: a `204` writes nothing, and Swagger UI's HTML
+    // goes out through `res.send`, where it is a page, not a record.
+    let responseBody: unknown;
+    const sendJson = res.json.bind(res);
+    res.json = (body: unknown) => {
+      responseBody = body;
+      return sendJson(body);
+    };
+
     // `close` rather than `finish`: it fires for a response the client gave up
     // on as well as one that completed, so an aborted request is still logged.
     res.on("close", () => {
@@ -103,6 +114,11 @@ export function createRequestLogging(log: LogSink): RequestHandler {
         direction: "outbound",
         status: completed ? res.statusCode : null,
         durationMs,
+        // Truncated on the same rule as the request's: past ~1KB a body says
+        // more about volume than content. A page of Tasks is comfortably under.
+        ...(responseBody === undefined
+          ? {}
+          : { body: truncateBody(responseBody) }),
         ...(completed ? {} : { aborted: true }),
         ...(res.locals.errorName ? { error: res.locals.errorName } : {}),
       });

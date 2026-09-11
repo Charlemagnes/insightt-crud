@@ -59,6 +59,19 @@ describe("loadEnv", () => {
     );
   });
 
+  it("reads the log format from NODE_ENV unless it is named outright", () => {
+    // A person reads development's console, a log shipper parses production's.
+    expect(loadEnv(COMPLETE).logFormat).toBe("pretty");
+    expect(loadEnv({ ...COMPLETE, NODE_ENV: "production" }).logFormat).toBe(
+      "json",
+    );
+    expect(loadEnv({ ...COMPLETE, LOG_FORMAT: "json" }).logFormat).toBe("json");
+    expect(
+      loadEnv({ ...COMPLETE, NODE_ENV: "production", LOG_FORMAT: "pretty" })
+        .logFormat,
+    ).toBe("pretty");
+  });
+
   it("builds the issuer base URL the tenant JWKS is fetched from", () => {
     expect(loadEnv(COMPLETE).auth0IssuerBaseUrl).toBe(
       "https://example.eu.auth0.com/",

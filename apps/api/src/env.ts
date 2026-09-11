@@ -42,6 +42,13 @@ const EnvSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
+  /**
+   * How the console renders each log record — not what is recorded, which is
+   * the same either way. `json` is the structured line PLAN.md §9 specifies;
+   * `pretty` is one readable line per request, for a human watching `npm run
+   * dev`. Unset follows `NODE_ENV`, so the default is right without being set.
+   */
+  LOG_FORMAT: z.enum(["pretty", "json"]).optional(),
 });
 
 export interface Env {
@@ -61,6 +68,11 @@ export interface Env {
    * everywhere but production; `docs/router.ts` explains why that is the split.
    */
   serveDocs: boolean;
+  /**
+   * Which console sink `index.ts` builds. Presentation only: both render the
+   * same records, so nothing is logged in one and missing from the other.
+   */
+  logFormat: "pretty" | "json";
 }
 
 /**
@@ -85,6 +97,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     PORT,
     WEB_ORIGIN,
     NODE_ENV,
+    LOG_FORMAT,
   } = parsed.data;
 
   return {
@@ -95,5 +108,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     port: PORT,
     webOrigin: WEB_ORIGIN,
     serveDocs: NODE_ENV !== "production",
+    // A log shipper parses production's output; a person reads development's.
+    logFormat: LOG_FORMAT ?? (NODE_ENV === "production" ? "json" : "pretty"),
   };
 }

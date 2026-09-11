@@ -45,6 +45,17 @@ describe("createRequestLogging", () => {
     expect(inbound.body).toEqual({ note: "hello" });
   });
 
+  it("logs the response body, which nothing holds once the response has gone", async () => {
+    // Taken as `res.json` writes it: by `close` the body is out on the wire and
+    // Express keeps no copy of it.
+    const { app, records } = harness();
+
+    await request(app).post("/things/t-1/parts/p-2").send({ note: "hello" });
+
+    const [outbound] = records.filter((r) => r.direction === "outbound");
+    expect(outbound.body).toEqual({ ok: true });
+  });
+
   it("timestamps the inbound line when the request arrived, not when it was written", async () => {
     const { app, records } = harness();
 

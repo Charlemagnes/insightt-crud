@@ -460,7 +460,9 @@ first, writing three lines per request:
   params, query params, headers, body (truncated at ~1KB)
 - **Actor** — the resolved `userId`, on the same request id, and only for a
   request that got past auth
-- **Outbound** — status code, duration in ms, error class on failure
+- **Outbound** — status code, duration in ms, the response body (truncated on
+  the same ~1KB rule; taken as `res.json` writes it, since by `close` it has
+  gone out and Express keeps no copy), error class on failure
 - **Redacted** — `authorization`, `cookie`, `set-cookie` → `[REDACTED]`
 
 **Mounted first — above CORS, the body parser and auth.** The brief asks to log
@@ -487,6 +489,21 @@ Emitting all three lines from one place is also what keeps them in order and on
 one request id: the Actor is read off the request that `attachActor` stamped,
 rather than logged by a second middleware that would otherwise race ahead of the
 inbound line it belongs under.
+
+**Two sinks, one record.** What is logged is the above, always. How it reaches
+the console is a `LogSink`, chosen in `index.ts` by `LOG_FORMAT` and defaulting
+off `NODE_ENV`: `consoleLogSink` writes the JSON, and production uses it;
+`createPrettyLogSink` lays the same three records out as one block — a summary
+line of time, status, method, path and duration, then the Actor, route params,
+query, headers, request body, response body and any 5xx stack on labelled lines
+under it, wrapped at the terminal's width — and development uses it, because
+three JSON lines with every header on one of them are not readable at the speed
+a demo moves.
+
+The pretty sink drops nothing that was recorded: it holds the inbound and actor
+records until the outbound one arrives, on the request id, and prints the three
+together. A field that is empty prints no line, which is the one difference —
+`params {}` under every request without route parameters is noise, not a record.
 
 ---
 
